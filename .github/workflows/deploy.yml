@@ -10,6 +10,7 @@ jobs:
   deploy:
     name: Deploy via SSH
     runs-on: ubuntu-latest
+    environment: aliyun
 
     steps:
       - name: Checkout repository
@@ -20,14 +21,9 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.ALIYUN_SSH_KEY }}" > ~/.ssh/aliyun.key
           chmod 600 ~/.ssh/aliyun.key
-          cat > ~/.ssh/config <<HEREDOC
-          Host aliyun
-            HostName ${{ secrets.ALIYUN_HOST }}
-            User ${{ secrets.ALIYUN_USER }}
-            IdentityFile ~/.ssh/aliyun.key
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-HEREDOC
+          printf 'Host aliyun\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/aliyun.key\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n' \
+            "${{ secrets.ALIYUN_HOST }}" \
+            "${{ secrets.ALIYUN_USER }}" > ~/.ssh/config
 
       - name: Execute remote deploy
         run: |
