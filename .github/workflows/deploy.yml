@@ -36,11 +36,11 @@ jobs:
 
           ALL_OK=true
           for port in 8080 8081 8082 8083; do
-            STATUS=$(ssh aliyun "curl -s -o /dev/null -w '%{http_code}' http://localhost:\$port/actuator/health" || echo "000")
+            STATUS=$(ssh aliyun "curl -s -o /dev/null -w '%{http_code}' http://localhost:${port}/actuator/health" || echo "000")
             if [ "$STATUS" = "200" ]; then
-              echo "  [OK] Port \$port — HEALTHY"
+              echo "  [OK] Port ${port} — HEALTHY"
             else
-              echo "  [FAIL] Port \$port — HTTP \$STATUS"
+              echo "  [FAIL] Port ${port} — HTTP ${STATUS}"
               ALL_OK=false
             fi
           done
