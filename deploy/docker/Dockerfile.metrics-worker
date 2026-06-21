@@ -3,17 +3,4 @@ WORKDIR /app
 COPY flag-metrics-worker/target/*.jar app.jar
 EXPOSE 8083
 
-ENV REDIS_HOST=dev_redis \
-    REDIS_PORT=6379 \
-    KAFKA_HOST=dev_kafka \
-    KAFKA_PORT=9092 \
-    CLICKHOUSE_HOST=dev_clickhouse \
-    CLICKHOUSE_PORT=8123 \
-    CLICKHOUSE_USERNAME=default \
-    CLICKHOUSE_PASSWORD= \
-    HOST_IP=192.168.5.66 \
-    FLUSH_INTERVAL_MS=10000 \
-    FLUSH_BATCH_SIZE=500 \
-    LOG_LEVEL=INFO
-
 ENTRYPOINT ["java", "-jar", "app.jar"]
