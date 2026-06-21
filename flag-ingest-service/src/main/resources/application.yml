@@ -1,0 +1,56 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: flag-ingest-service
+  data:
+    redis:
+      host: ${REDIS_HOST:192.168.5.66}
+      port: ${REDIS_PORT:6379}
+      timeout: 3000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+  kafka:
+    bootstrap-servers: ${KAFKA_HOST:192.168.5.66}:${KAFKA_PORT:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: 1
+      retries: 0
+      properties:
+        enable.idempotence: false
+        max.block.ms: 500
+    # Consumer config reserved (IngestService currently only produces; consumption is handled by MetricsWorker)
+    consumer:
+      group-id: flag-ingest-group
+      auto-offset-reset: earliest
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+# SDK report-back source address (overridden by K8s environment variables)
+app:
+  host-ip: ${HOST_IP:192.168.5.66}
+  ingest:
+    # Audit log timeout config (ms)
+    audit-log-timeout-ms: ${AUDIT_LOG_TIMEOUT_MS:200}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+
+logging:
+  level:
+    com.flag: ${LOG_LEVEL:INFO}

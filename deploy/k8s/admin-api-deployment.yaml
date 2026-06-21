@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flag-admin-api
+  namespace: flag-system
+  labels:
+    app: flag-admin-api
+    tier: control-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flag-admin-api
+  template:
+    metadata:
+      labels:
+        app: flag-admin-api
+        tier: control-plane
+    spec:
+      containers:
+        - name: admin-api
+          image: docker-flag-admin-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_PORT
+            - name: DB_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_PASSWORD
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: REDIS_PORT
+            - name: HOST_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: HOST_IP
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: LOG_LEVEL
+            - name: JPA_SHOW_SQL
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: JPA_SHOW_SQL
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "256m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flag-admin-api
+  namespace: flag-system
+  labels:
+    app: flag-admin-api
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+      protocol: TCP
+      name: http
+  selector:
+    app: flag-admin-api

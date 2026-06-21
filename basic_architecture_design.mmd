@@ -1,0 +1,87 @@
+graph TB
+    subgraph Client_Side [客户端层 / SDK - 应用隔离]
+        direction LR
+        HeavySDK_A[后端 Heavy SDK <br> 应用 A Pods * 500]
+        HeavySDK_B[后端 Heavy SDK <br> 应用 B Pods * 500]
+        AppSDK[移动端 Light SDK <br> 最终用户 App <br> 带 App_ID 隔离]
+        WebSDK[网页端 Light SDK <br> 浏览器本地评估 <br> 带 App_ID 隔离]
+    end
+
+    subgraph Traffic_Ingress [边缘与网关层]
+        direction TB
+        LB[K8s Ingress / 负载均衡 <br> 动态路由分发]
+        CDN[CDN / 边缘节点 <br> 缓存各App全量规则快照JSON <br> 支持 Purge API]
+        PushServer[统一推送中心 <br> 支持 Payload 携带增量规则]
+    end
+
+    subgraph Control_Plane [控制面 - 低并发 / 强一致]
+        direction TB
+        AdminUI[管理后台 UI]
+        AdminAPI[Admin API 服务]
+        DB[(PostgreSQL <br> 存储基础规则元数据)]
+    end
+
+    subgraph Data_Plane [数据面 - 职责彻底净化 / 进程内通道隔离]
+        direction TB
+        EvalService[EvalService <br> 仅暴露 /evaluate <br> 纯内存计算 / 无状态集群]
+
+        subgraph IngestService_Detail [IngestService 内部解耦]
+            MetricsChannel[1. 指标异步通道 <br> Pool A: Fire & Forget]
+            LogChannel[2. 审计日志通道 <br> Pool B: 带超时与降级丢弃]
+        end
+
+        Redis[(Redis <br> 1. 指标高频内存计数 <br> 2. Pub/Sub 变更通知)]
+    end
+
+    subgraph Async_Log_Metrics [异步大数据管道 / 最终落地]
+        direction TB
+        KafkaStream[[Kafka 消息队列 <br> 审计日志异步缓冲]]
+        MetricsWorker[Metrics Worker 服务 <br> 异步指标配置化落盘]
+        CH[(ClickHouse <br> 1. 命中指标统计表 <br> 2. 评估行为审计流水表)]
+    end
+
+    %% 1. 控制面写入与本地通知
+    AdminUI --> AdminAPI
+    AdminAPI -->|2. 写入规则| DB
+    AdminAPI -->|2. 发布变更通知| Redis
+
+    %% 2. 后端微服务同步链路 (按应用 App_ID 精准定向分发)
+    Redis -.->|3. 监听通知并全量拉取DB| EvalService
+    EvalService -.->|4a. SSE 长连接: 仅推送应用A变更| HeavySDK_A
+    EvalService -.->|4b. SSE 长连接: 仅推送应用B变更| HeavySDK_B
+
+    %% 3. 移动端秒级同步 (带 Payload 优化)
+    AdminAPI -->|5a. 推送包含增量规则| PushServer
+    PushServer -.->|5b. 携带数据直接更新本地内存| AppSDK
+    AppSDK -.->|5c. 异常时绕过缓存兜底拉取| LB
+
+    %% 4. Web 端同步 (CDN 缓存全量规则快照文件，下发至本地评估)
+    AdminAPI -->|6a. 清除指定 App 缓存快照| CDN
+    WebSDK -->|6b. 获取所属 App_ID 全量规则快照| CDN
+    CDN -->|6c. 缓存失效回源| LB
+    LB --> EvalService
+
+    %% 5. 极致净化的南北向/东西向数据上报流水线
+    HeavySDK_A & HeavySDK_B -->|7a. 10s 局部聚合指标上报| LB
+    AppSDK -->|7b. 客户端指标与审计上报| LB
+    WebSDK -->|7c. 客户端指标与审计上报| LB
+
+    %% 流量全部分流
+    LB -->|路由分发: 仅限计算请求 /evaluate| EvalService
+    LB -->|路由分发: 上报流量合并入口| IngestService_Detail
+
+    %% IngestService 内部双通道分流
+    MetricsChannel -->|8. HINCRBY 内存计数| Redis
+    LogChannel -.->|11. 快速写入缓冲区 <br> 超时自动丢弃并计入 ingest_drop_total| KafkaStream
+
+    %% 异步落盘最终归宿：ClickHouse
+    Redis -.->|9. 批量拉取指标| MetricsWorker
+    MetricsWorker -->|10. 批量写入指标| CH
+    KafkaStream -.->|12. 流式清洗落盘| CH
+
+    style Control_Plane fill:#f9f,stroke:#333,stroke-width:2px
+    style Data_Plane fill:#bbf,stroke:#333,stroke-width:2px
+    style Client_Side fill:#dfd,stroke:#333,stroke-width:2px
+    style Traffic_Ingress fill:#fffbbf,stroke:#333,stroke-width:2px
+    style Async_Log_Metrics fill:#fdd,stroke:#333,stroke-width:2px
+    style IngestService_Detail fill:#fff,stroke:#333,stroke-width:1px,stroke-dasharray: 5 5

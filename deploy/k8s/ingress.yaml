@@ -1,0 +1,47 @@
+# ============================================================
+# Ingress-Nginx Configuration (Optional)
+# To access via domain name, first install the Ingress-Nginx controller:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+# Or Docker Desktop GUI: Settings → Kubernetes → Enable Ingress-Nginx
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flag-ingress
+  namespace: flag-system
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: flag.local
+      http:
+        paths:
+          - path: /api/v1/apps
+            pathType: Prefix
+            backend:
+              service:
+                name: flag-admin-api
+                port:
+                  number: 8080
+          - path: /api/v1/eval
+            pathType: Prefix
+            backend:
+              service:
+                name: flag-eval-service
+                port:
+                  number: 8081
+          - path: /api/v1/ingest
+            pathType: Prefix
+            backend:
+              service:
+                name: flag-ingest-service
+                port:
+                  number: 8082
+          - path: /actuator
+            pathType: Prefix
+            backend:
+              service:
+                name: flag-admin-api
+                port:
+                  number: 8080

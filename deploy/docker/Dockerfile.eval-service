@@ -1,0 +1,17 @@
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+COPY flag-eval-service/target/*.jar app.jar
+EXPOSE 8081
+
+ENV DB_HOST=dev_postgres \
+    DB_PORT=5432 \
+    DB_USERNAME=postgres \
+    DB_PASSWORD=postgres \
+    REDIS_HOST=dev_redis \
+    REDIS_PORT=6379 \
+    HOST_IP=192.168.5.66 \
+    SSE_HEARTBEAT_MS=30000 \
+    EVAL_DEFAULT_RESULT=false \
+    LOG_LEVEL=INFO
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

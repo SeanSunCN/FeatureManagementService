@@ -1,0 +1,128 @@
+version: "3.8"
+
+# ============================================================
+# Feature Management Service -- Microservice Orchestration
+#
+# Network notes:
+# - All microservices join the external network infra_net (external: true)
+# - Middleware (PostgreSQL / Redis / Kafka / ClickHouse, etc.)
+#   is already running in that network and does not need redeclaration here
+# - Containers communicate via hostname DNS resolution
+#   (e.g. dev_postgres:5432, dev_redis:6379, etc.)
+# - SDK origin-address is controlled by the HOST_IP environment variable,
+#   defaulting to 192.168.5.66
+# ============================================================
+
+services:
+  flag-admin-api:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.admin-api
+    container_name: flag-admin-api
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=dev_postgres
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - REDIS_HOST=dev_redis
+      - REDIS_PORT=6379
+      - HOST_IP=192.168.5.66
+      - JPA_SHOW_SQL=false
+      - LOG_LEVEL=INFO
+    networks:
+      - infra_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  flag-eval-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.eval-service
+    container_name: flag-eval-service
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=dev_postgres
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - REDIS_HOST=dev_redis
+      - REDIS_PORT=6379
+      - HOST_IP=192.168.5.66
+      - SSE_HEARTBEAT_MS=30000
+      - LOG_LEVEL=INFO
+    networks:
+      - infra_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  flag-ingest-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.ingest-service
+    container_name: flag-ingest-service
+    ports:
+      - "8082:8082"
+    environment:
+      - REDIS_HOST=dev_redis
+      - REDIS_PORT=6379
+      - KAFKA_HOST=dev_kafka
+      - KAFKA_PORT=9092
+      - HOST_IP=192.168.5.66
+      - AUDIT_LOG_TIMEOUT_MS=200
+      - LOG_LEVEL=INFO
+    networks:
+      - infra_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8082/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  flag-metrics-worker:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.metrics-worker
+    container_name: flag-metrics-worker
+    ports:
+      - "8083:8083"
+    environment:
+      - REDIS_HOST=dev_redis
+      - REDIS_PORT=6379
+      - KAFKA_HOST=dev_kafka
+      - KAFKA_PORT=9092
+      - CLICKHOUSE_HOST=dev_clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USERNAME=default
+      - CLICKHOUSE_PASSWORD=
+      - HOST_IP=192.168.5.66
+      - FLUSH_INTERVAL_MS=10000
+      - FLUSH_BATCH_SIZE=500
+      - LOG_LEVEL=INFO
+    networks:
+      - infra_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8083/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  infra_net:
+    external: true

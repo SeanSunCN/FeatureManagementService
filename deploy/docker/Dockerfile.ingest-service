@@ -1,0 +1,14 @@
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+COPY flag-ingest-service/target/*.jar app.jar
+EXPOSE 8082
+
+ENV REDIS_HOST=dev_redis \
+    REDIS_PORT=6379 \
+    KAFKA_HOST=dev_kafka \
+    KAFKA_PORT=9092 \
+    HOST_IP=192.168.5.66 \
+    AUDIT_LOG_TIMEOUT_MS=200 \
+    LOG_LEVEL=INFO
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

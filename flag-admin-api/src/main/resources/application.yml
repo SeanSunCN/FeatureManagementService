@@ -1,0 +1,58 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: flag-admin-api
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:192.168.5.66}:${DB_PORT:15432}/flag_db
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:666666}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  data:
+    redis:
+      host: ${REDIS_HOST:192.168.5.66}
+      port: ${REDIS_PORT:6379}
+      timeout: 3000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+  # Kafka reserved config (Admin API does not need it yet, but keep the entry)
+  # kafka:
+  #   bootstrap-servers: ${KAFKA_HOST:dev_kafka}:${KAFKA_PORT:9092}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+
+logging:
+  level:
+    com.flag: ${LOG_LEVEL:INFO}
+    org.hibernate.SQL: ${JPA_SHOW_SQL:WARN}

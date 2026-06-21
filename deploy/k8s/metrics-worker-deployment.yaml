@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flag-metrics-worker
+  namespace: flag-system
+  labels:
+    app: flag-metrics-worker
+    tier: async-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flag-metrics-worker
+  template:
+    metadata:
+      labels:
+        app: flag-metrics-worker
+        tier: async-pipeline
+    spec:
+      containers:
+        - name: metrics-worker
+          image: docker-flag-metrics-worker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8083
+              protocol: TCP
+          env:
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: REDIS_PORT
+            - name: KAFKA_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: KAFKA_HOST
+            - name: KAFKA_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: KAFKA_PORT
+            - name: CLICKHOUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: CLICKHOUSE_HOST
+            - name: CLICKHOUSE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: CLICKHOUSE_PORT
+            - name: CLICKHOUSE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: CLICKHOUSE_USERNAME
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: CLICKHOUSE_PASSWORD
+            - name: HOST_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: HOST_IP
+            - name: FLUSH_INTERVAL_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: FLUSH_INTERVAL_MS
+            - name: FLUSH_BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: FLUSH_BATCH_SIZE
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: LOG_LEVEL
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8083
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8083
+            initialDelaySeconds: 45
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "256m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flag-metrics-worker
+  namespace: flag-system
+  labels:
+    app: flag-metrics-worker
+spec:
+  type: NodePort
+  ports:
+    - port: 8083
+      targetPort: 8083
+      nodePort: 30083
+      protocol: TCP
+      name: http
+  selector:
+    app: flag-metrics-worker

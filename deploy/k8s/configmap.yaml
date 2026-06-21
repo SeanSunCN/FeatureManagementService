@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flag-infra-config
+  namespace: flag-system
+data:
+  # K8s accesses NAS middleware via ExternalName Service internally
+  # Middleware ports use the mapped ports from the NAS host
+  DB_HOST: "dev-postgres.flag-system.svc.cluster.local"
+  DB_PORT: "15432"
+  DB_USERNAME: "postgres"
+  DB_PASSWORD: "666666"
+  REDIS_HOST: "dev-redis.flag-system.svc.cluster.local"
+  REDIS_PORT: "6379"
+  KAFKA_HOST: "dev-kafka.flag-system.svc.cluster.local"
+  KAFKA_PORT: "9092"
+  CLICKHOUSE_HOST: "dev-clickhouse.flag-system.svc.cluster.local"
+  # 8123 = ClickHouse HTTP protocol port (JDBC driver uses HTTP)
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_USERNAME: "dev"
+  CLICKHOUSE_PASSWORD: "E96I3N6RokvAujGXWghCBcfL"
+  # External SDK return-source address
+  HOST_IP: "192.168.5.66"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flag-app-config
+  namespace: flag-system
+data:
+  SSE_HEARTBEAT_MS: "30000"
+  AUDIT_LOG_TIMEOUT_MS: "200"
+  FLUSH_INTERVAL_MS: "10000"
+  FLUSH_BATCH_SIZE: "500"
+  LOG_LEVEL: "INFO"
+  JPA_SHOW_SQL: "false"
+  EVAL_DEFAULT_RESULT: "false"

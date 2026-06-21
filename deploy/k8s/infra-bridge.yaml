@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-postgres
+  namespace: flag-system
+  labels:
+    app: infra-bridge
+    middleware: postgresql
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 15432
+      targetPort: 15432
+      protocol: TCP
+      name: postgres
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: dev-postgres
+  namespace: flag-system
+subsets:
+  - addresses:
+      - ip: 192.168.5.66
+    ports:
+      - port: 15432
+        name: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-redis
+  namespace: flag-system
+  labels:
+    app: infra-bridge
+    middleware: redis
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: redis
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: dev-redis
+  namespace: flag-system
+subsets:
+  - addresses:
+      - ip: 192.168.5.66
+    ports:
+      - port: 6379
+        name: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-kafka
+  namespace: flag-system
+  labels:
+    app: infra-bridge
+    middleware: kafka
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 9092
+      targetPort: 9092
+      protocol: TCP
+      name: kafka
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: dev-kafka
+  namespace: flag-system
+subsets:
+  - addresses:
+      - ip: 192.168.5.66
+    ports:
+      - port: 9092
+        name: kafka
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dev-clickhouse
+  namespace: flag-system
+  labels:
+    app: infra-bridge
+    middleware: clickhouse
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: 8123
+      targetPort: 8123
+      protocol: TCP
+      name: clickhouse
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: dev-clickhouse
+  namespace: flag-system
+subsets:
+  - addresses:
+      - ip: 192.168.5.66
+    ports:
+      - port: 8123
+        name: clickhouse

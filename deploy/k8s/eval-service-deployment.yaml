@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flag-eval-service
+  namespace: flag-system
+  labels:
+    app: flag-eval-service
+    tier: data-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flag-eval-service
+  template:
+    metadata:
+      labels:
+        app: flag-eval-service
+        tier: data-plane
+    spec:
+      containers:
+        - name: eval-service
+          image: docker-flag-eval-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+              protocol: TCP
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_PORT
+            - name: DB_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: DB_PASSWORD
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: REDIS_PORT
+            - name: HOST_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-infra-config
+                  key: HOST_IP
+            - name: SSE_HEARTBEAT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: SSE_HEARTBEAT_MS
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: LOG_LEVEL
+            - name: EVAL_DEFAULT_RESULT
+              valueFrom:
+                configMapKeyRef:
+                  name: flag-app-config
+                  key: EVAL_DEFAULT_RESULT
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 40
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "256m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flag-eval-service
+  namespace: flag-system
+  labels:
+    app: flag-eval-service
+spec:
+  type: NodePort
+  ports:
+    - port: 8081
+      targetPort: 8081
+      nodePort: 30081
+      protocol: TCP
+      name: http
+  selector:
+    app: flag-eval-service
