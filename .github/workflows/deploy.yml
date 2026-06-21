@@ -51,3 +51,12 @@ jobs:
             echo "Some services are unhealthy — check server logs."
             exit 1
           fi
+
+      - name: Run integration tests
+        run: |
+          ssh aliyun "cd ${{ secrets.ALIYUN_PROJECT_DIR }} && bash deploy/scripts/integration-test.sh \
+            http://localhost:8080 \
+            http://localhost:8081 \
+            http://localhost:8082 \
+            http://localhost:8083 \
+            5"
