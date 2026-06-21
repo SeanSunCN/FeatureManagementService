@@ -1,5 +1,3 @@
-version: "3.8"
-
 # ============================================================
 # Feature Management Service — Alibaba Cloud Deployment
 #
@@ -65,8 +63,8 @@ services:
     ports:
       - "9092:9092"
     environment:
-      # KRaft mode (no Zookeeper)
-      CLUSTER_ID: "flag-cluster-01"
+      # KRaft mode (no Zookeeper) — 16-byte base64 UUID
+      CLUSTER_ID: "MkU3NDg4QTRGOTdCMTFFRg=="
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093"
@@ -116,14 +114,15 @@ services:
       CLICKHOUSE_USER: dev
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-dev123}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    # Healthcheck with authenticationMENT: 1\n    # Healthcheck with authentication credentials"
     volumes:
       - clickhousedata:/var/lib/clickhouse
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:8123/ping || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 0s
     networks:
       - flag_net
     restart: unless-stopped
@@ -239,7 +238,7 @@ services:
       - CLICKHOUSE_HOST=flag-clickhouse
       - CLICKHOUSE_PORT=8123
       - CLICKHOUSE_USERNAME=dev
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-dev123}
+      - CLICKHOUSE_PASSWORD=dev123
       - HOST_IP=${HOST_IP:-}
       - FLUSH_INTERVAL_MS=10000
       - FLUSH_BATCH_SIZE=500

@@ -4,6 +4,7 @@ import com.flag.common.response.UnifiedResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -14,10 +15,15 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BusinessException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public UnifiedResponse<Void> handleBusinessException(BusinessException e) {
+    public ResponseEntity<UnifiedResponse<Void>> handleBusinessException(BusinessException e) {
         log.warn("Business exception: code={}, message={}", e.getCode(), e.getMessage());
-        return UnifiedResponse.error(e.getCode(), e.getMessage());
+        // NOT_FOUND error codes should return 404, others return 400
+        HttpStatus status = (e.getCode() == ErrorCode.APP_NOT_FOUND.getCode()
+                || e.getCode() == ErrorCode.FLAG_NOT_FOUND.getCode())
+                ? HttpStatus.NOT_FOUND
+                : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status)
+                .body(UnifiedResponse.error(e.getCode(), e.getMessage()));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

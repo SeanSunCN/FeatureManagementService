@@ -223,8 +223,8 @@ status=$(get_json | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
 # ============================================================
 header "8/9  Control Plane Operations (Toggle / Update / Delete)"
 
-# Disable flag-a (PATCH uses QueryParam)
-http_code=$(call_api PATCH "$ADMIN_API/api/v1/apps/integration-test-app/flags/flag-a/enabled?enabled=false")
+# Disable flag-a (PATCH requires JSON body)
+http_code=$(call_api PATCH "$ADMIN_API/api/v1/apps/integration-test-app/flags/flag-a/enabled" '{"enabled":false}')
 [ "$http_code" = "200" ] && pass "Toggle flag-a off" || fail "Toggle flag-a" "HTTP=$http_code"
 sleep "$WAIT_SYNC"
 
