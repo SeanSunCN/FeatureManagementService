@@ -1,18 +1,25 @@
 package com.flag.admin.controller;
 
+import com.flag.admin.dto.CreateFlagRequest;
 import com.flag.admin.dto.FlagEnabledRequest;
-import com.flag.admin.entity.FeatureFlagEntity;
+import com.flag.admin.dto.FlagUpdateRequest;
 import com.flag.admin.service.FeatureFlagService;
 import com.flag.common.response.UnifiedResponse;
+import jakarta.validation.Valid;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 /**
  * Feature flag rule management API.
- *
- * Corresponding architecture diagram: Control plane Admin API — rule CRUD
+ * <p>
+ * Architecture: Control plane Admin API — rule CRUD
+ * <p>
+ * All mutations accept a dedicated DTO instead of the raw Entity
+ * to prevent mass-assignment attacks.
  */
+@Validated
 @RestController
 @RequestMapping("/api/v1/apps/{appId}/flags")
 public class FeatureFlagController {
@@ -24,28 +31,38 @@ public class FeatureFlagController {
     }
 
     @GetMapping
-    public UnifiedResponse<List<FeatureFlagEntity>> listFlags(@PathVariable String appId) {
+    public UnifiedResponse<List<?>> listFlags(@PathVariable String appId) {
         return UnifiedResponse.success(featureFlagService.listByAppId(appId));
     }
 
     @GetMapping("/{flagKey}")
-    public UnifiedResponse<FeatureFlagEntity> getFlag(@PathVariable String appId,
-                                                      @PathVariable String flagKey) {
+    public UnifiedResponse<?> getFlag(@PathVariable String appId,
+                                      @PathVariable String flagKey) {
         return UnifiedResponse.success(featureFlagService.getByAppIdAndFlagKey(appId, flagKey));
     }
 
+    /**
+     * Create a new feature flag.
+     * appId comes from @PathVariable, flagKey from the DTO (required at creation time).
+     */
     @PostMapping
-    public UnifiedResponse<FeatureFlagEntity> createFlag(@PathVariable String appId,
-                                                         @RequestBody FeatureFlagEntity flag) {
-        flag.setAppId(appId);
-        return UnifiedResponse.success(featureFlagService.create(flag));
+    public UnifiedResponse<Void> createFlag(@PathVariable String appId,
+                                            @Valid @RequestBody CreateFlagRequest request) {
+        featureFlagService.createFromDto(appId, request);
+        return UnifiedResponse.success();
     }
 
+    /**
+     * Update an existing feature flag.
+     * appId and flagKey come from @PathVariable — the DTO intentionally lacks them,
+     * preventing illegal modification of unique-index fields via HTTP body.
+     */
     @PutMapping("/{flagKey}")
-    public UnifiedResponse<FeatureFlagEntity> updateFlag(@PathVariable String appId,
-                                                         @PathVariable String flagKey,
-                                                         @RequestBody FeatureFlagEntity flag) {
-        return UnifiedResponse.success(featureFlagService.update(appId, flagKey, flag));
+    public UnifiedResponse<Void> updateFlag(@PathVariable String appId,
+                                            @PathVariable String flagKey,
+                                            @Valid @RequestBody FlagUpdateRequest request) {
+        featureFlagService.updateFromDto(appId, flagKey, request);
+        return UnifiedResponse.success();
     }
 
     @DeleteMapping("/{flagKey}")
@@ -56,10 +73,11 @@ public class FeatureFlagController {
     }
 
     @PatchMapping("/{flagKey}/enabled")
-    public UnifiedResponse<FeatureFlagEntity> setEnabled(@PathVariable String appId,
-                                                         @PathVariable String flagKey,
-                                                         @RequestBody FlagEnabledRequest request) {
-        return UnifiedResponse.success(featureFlagService.setEnabled(appId, flagKey, request.isEnabled()));
+    public UnifiedResponse<Void> setEnabled(@PathVariable String appId,
+                                            @PathVariable String flagKey,
+                                            @RequestBody FlagEnabledRequest request) {
+        featureFlagService.setEnabled(appId, flagKey, request.isEnabled());
+        return UnifiedResponse.success();
     }
 
     @PostMapping("/reload")
