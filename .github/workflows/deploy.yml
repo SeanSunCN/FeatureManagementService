@@ -20,14 +20,14 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.ALIYUN_SSH_KEY }}" > ~/.ssh/aliyun.key
           chmod 600 ~/.ssh/aliyun.key
-          cat >> ~/.ssh/config << 'EOF'
+          cat > ~/.ssh/config <<HEREDOC
           Host aliyun
             HostName ${{ secrets.ALIYUN_HOST }}
             User ${{ secrets.ALIYUN_USER }}
             IdentityFile ~/.ssh/aliyun.key
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
-          EOF
+HEREDOC
 
       - name: Execute remote deploy
         run: |
