@@ -46,7 +46,7 @@ public class FlagChangePublisher {
         log.info("Published reload signal for appId={}", appId);
     }
 
-    private String toJson(Object obj) {
+    public String toJson(Object obj) {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(obj);
         } catch (Exception e) {

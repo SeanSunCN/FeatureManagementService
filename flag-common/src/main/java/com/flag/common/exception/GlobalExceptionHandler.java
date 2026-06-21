@@ -27,6 +27,19 @@ public class GlobalExceptionHandler {
         return UnifiedResponse.error(ErrorCode.BAD_REQUEST.getCode(), e.getMessage());
     }
 
+    /**
+     * Handle JPA optimistic lock failure caused by concurrent admin modifications.
+     * Returns 409 Conflict with specific error code instead of a raw 500.
+     * Frontend can catch code=20012 and prompt the user to refresh.
+     */
+    @ExceptionHandler(org.springframework.dao.OptimisticLockingFailureException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public UnifiedResponse<Void> handleOptimisticLock(org.springframework.dao.OptimisticLockingFailureException e) {
+        log.warn("Optimistic lock failure: {}", e.getMessage());
+        return UnifiedResponse.error(ErrorCode.FLAG_VERSION_CONFLICT.getCode(),
+                "The flag was modified by another admin. Please refresh and retry.");
+    }
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public UnifiedResponse<Void> handleException(Exception e) {

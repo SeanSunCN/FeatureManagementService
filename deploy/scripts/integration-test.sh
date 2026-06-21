@@ -102,7 +102,7 @@ http_code=$(call_api POST "$ADMIN_API/api/v1/apps/integration-test-app/flags" '{
     "name": "Flag A (Full Rollout)",
     "description": "Full rollout test",
     "enabled": true,
-    "ruleConfig": "{\"strategy\":\"full_rollout\"}"
+    "ruleConfig": "{\"strategy\":\"boolean\",\"enabled\":true}"
 }')
 [ "$http_code" = "200" ] && pass "Create flag-a" || fail "Create flag-a" "HTTP=$http_code"
 

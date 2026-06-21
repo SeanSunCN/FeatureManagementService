@@ -58,10 +58,28 @@ CREATE INDEX IF NOT EXISTS idx_flag_feature_app_id ON flag_feature(app_id);
 CREATE INDEX IF NOT EXISTS idx_flag_feature_app_flag ON flag_feature(app_id, flag_key);
 
 -- ============================================================
+-- Transactional outbox table
+-- Stores change events atomically with business data updates;
+-- OutboxPoller reads unsent rows and delivers to Redis asynchronously.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS flag_outbox (
+    id              BIGSERIAL PRIMARY KEY,
+    channel         VARCHAR(64)  NOT NULL,
+    payload         TEXT         NOT NULL,
+    sent            BOOLEAN      NOT NULL DEFAULT FALSE,
+    retry_count     INTEGER      NOT NULL DEFAULT 0,
+    dead_letter     BOOLEAN      NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_flag_outbox_pending ON flag_outbox(sent, dead_letter, retry_count, created_at)
+    WHERE sent = FALSE AND dead_letter = FALSE;
+
+-- ============================================================
 -- Verify table creation results
 -- ============================================================
 SELECT 'PostgreSQL init complete' AS status,
        table_name
 FROM information_schema.tables
 WHERE table_schema = 'public'
-  AND table_name IN ('flag_app', 'flag_feature');
+  AND table_name IN ('flag_app', 'flag_feature', 'flag_outbox');
