@@ -1,0 +1,57 @@
+name: Deploy to Alibaba Cloud
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy via SSH
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ALIYUN_SSH_KEY }}" > ~/.ssh/aliyun.key
+          chmod 600 ~/.ssh/aliyun.key
+          cat >> ~/.ssh/config << 'EOF'
+          Host aliyun
+            HostName ${{ secrets.ALIYUN_HOST }}
+            User ${{ secrets.ALIYUN_USER }}
+            IdentityFile ~/.ssh/aliyun.key
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+
+      - name: Execute remote deploy
+        run: |
+          ssh aliyun "cd ${{ secrets.ALIYUN_PROJECT_DIR }} && PROJECT_DIR=${{ secrets.ALIYUN_PROJECT_DIR }} bash deploy/scripts/deploy.sh"
+
+      - name: Verify deployment health
+        run: |
+          echo "Waiting for services to stabilize..."
+          sleep 15
+
+          ALL_OK=true
+          for port in 8080 8081 8082 8083; do
+            STATUS=$(ssh aliyun "curl -s -o /dev/null -w '%{http_code}' http://localhost:\$port/actuator/health" || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "  [OK] Port \$port — HEALTHY"
+            else
+              echo "  [FAIL] Port \$port — HTTP \$STATUS"
+              ALL_OK=false
+            fi
+          done
+
+          if [ "$ALL_OK" = "true" ]; then
+            echo "All 4 services are healthy!"
+          else
+            echo "Some services are unhealthy — check server logs."
+            exit 1
+          fi
