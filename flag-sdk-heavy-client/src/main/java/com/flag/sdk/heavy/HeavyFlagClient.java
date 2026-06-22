@@ -2,14 +2,10 @@ package com.flag.sdk.heavy;
 
 import com.flag.common.dto.EvaluateRequest;
 import com.flag.common.dto.EvaluateResponse;
-import com.flag.common.dto.EvaluationContext;
-import com.flag.common.dto.FlagChangeMessage;
-import com.flag.common.dto.MetricsReportRequest;
 import com.flag.sdk.FlagSdkClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
@@ -38,30 +34,50 @@ public class HeavyFlagClient implements FlagSdkClient {
     private final String appId;
     private final String ingestServiceUrl;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
+    private final AtomicBoolean initialized = new AtomicBoolean(false);
 
     private final FeatureDataStore dataStore;
     private final SseStreamManager sseStream;
-    private final WebClient webClient; // for remote fallback evaluation
+    private final RemoteEvaluator remoteEvaluator; // for remote fallback evaluation
     private final List<Consumer<HeavyFlagClient>> connectListeners = new ArrayList<>();
     private final List<Consumer<HeavyFlagClient>> disconnectListeners = new ArrayList<>();
     private final AtomicBoolean connected = new AtomicBoolean(false);
 
+    /**
+     * Public constructor — creates all internal dependencies automatically (production use).
+     */
     public HeavyFlagClient(String appId, String evalServiceUrl, String ingestServiceUrl) {
+        this(appId, evalServiceUrl, ingestServiceUrl,
+                createDefaultDataStore(appId, evalServiceUrl));
+    }
+
+    public HeavyFlagClient(String appId, String evalServiceUrl) {
+        this(appId, evalServiceUrl, null);
+    }
+
+    /**
+     * Internal constructor — creates all dependencies from a shared dataStore.
+     */
+    private HeavyFlagClient(String appId, String evalServiceUrl, String ingestServiceUrl,
+                    FeatureDataStore dataStore) {
+        this(appId, ingestServiceUrl, dataStore,
+                createDefaultSseStream(appId, evalServiceUrl, dataStore),
+                createDefaultRemoteEvaluator(appId, evalServiceUrl));
+    }
+
+    /**
+     * Package-private constructor — all dependencies injected by caller (used in tests).
+     */
+    HeavyFlagClient(String appId, String ingestServiceUrl,
+                    FeatureDataStore dataStore,
+                    SseStreamManager sseStream,
+                    RemoteEvaluator remoteEvaluator) {
         this.appId = appId;
         this.ingestServiceUrl = ingestServiceUrl;
+        this.dataStore = dataStore;
+        this.sseStream = sseStream;
+        this.remoteEvaluator = remoteEvaluator;
 
-        ObjectMapper mapper = new ObjectMapper();
-        FlagEntryParser parser = new FlagEntryParser(mapper);
-        this.dataStore = new FeatureDataStore(appId, evalServiceUrl, mapper);
-
-        // SSE connection uses the same base URL
-        WebClient webClient = WebClient.builder()
-                .baseUrl(evalServiceUrl)
-                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
-                .build();
-        this.webClient = webClient;
-
-        this.sseStream = new SseStreamManager(appId, webClient, dataStore, parser);
         this.sseStream.onConnect(flag -> {
             connected.set(flag);
             if (flag) notifyConnect();
@@ -71,8 +87,32 @@ public class HeavyFlagClient implements FlagSdkClient {
         HeavyMetricsAggregator.register(appId, ingestServiceUrl);
     }
 
-    public HeavyFlagClient(String appId, String evalServiceUrl) {
-        this(appId, evalServiceUrl, null);
+    // ========================================================================
+    //  Default factory methods (production defaults)
+    // ========================================================================
+
+    private static FeatureDataStore createDefaultDataStore(String appId, String evalServiceUrl) {
+        ObjectMapper mapper = new ObjectMapper();
+        return new FeatureDataStore(appId, evalServiceUrl, mapper);
+    }
+
+    private static SseStreamManager createDefaultSseStream(String appId, String evalServiceUrl,
+                                                           FeatureDataStore sharedDataStore) {
+        ObjectMapper mapper = new ObjectMapper();
+        FlagEntryParser parser = new FlagEntryParser(mapper);
+        WebClient webClient = WebClient.builder()
+                .baseUrl(evalServiceUrl)
+                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+        return new SseStreamManager(appId, webClient, sharedDataStore, parser);
+    }
+
+    private static RemoteEvaluator createDefaultRemoteEvaluator(String appId, String evalServiceUrl) {
+        WebClient webClient = WebClient.builder()
+                .baseUrl(evalServiceUrl)
+                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+        return new WebClientRemoteEvaluator(appId, webClient);
     }
 
     // ========================================================================
@@ -88,6 +128,7 @@ public class HeavyFlagClient implements FlagSdkClient {
         }
         log.info("Initializing HeavyFlagClient for appId={}", appId);
         sseStream.start();
+        initialized.set(true);
         log.info("HeavyFlagClient initialized, cacheSize={}", dataStore.size());
         return this;
     }
@@ -139,7 +180,7 @@ public class HeavyFlagClient implements FlagSdkClient {
     // ========================================================================
 
     public boolean isConnected() { return connected.get(); }
-    public boolean isInitialized() { return true; } // init() is blocking
+    public boolean isInitialized() { return initialized.get(); }
     public boolean isShutdown() { return shutdown.get(); }
     public int cacheSize() { return dataStore.size(); }
     public long lastHeartbeatTime() { return sseStream.lastHeartbeatTime(); }
@@ -189,6 +230,7 @@ public class HeavyFlagClient implements FlagSdkClient {
         dataStore.clear();
 
         connected.set(false);
+        initialized.set(false);
         notifyDisconnect();
         log.info("HeavyFlagClient shut down for appId={}", appId);
     }
@@ -197,36 +239,10 @@ public class HeavyFlagClient implements FlagSdkClient {
     //  Remote fallback
     // ========================================================================
 
-    @SuppressWarnings("unchecked")
     private boolean remoteEvaluate(String flagKey, String userId,
                                     Map<String, String> attributes) {
         if (shutdown.get()) return false;
-
-        try {
-            EvaluateRequest req = new EvaluateRequest();
-            req.setAppId(appId);
-            req.setFlagKey(flagKey);
-            req.setUserId(userId);
-            req.setAttributes(attributes);
-
-            Map<String, Object> response = webClient.post()
-                    .uri("/api/v1/eval/evaluate")
-                    .bodyValue(req)
-                    .retrieve()
-                    .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                    .timeout(REMOTE_EVAL_TIMEOUT)
-                    .block();
-
-            if (response != null && response.get("data") instanceof Map) {
-                Map<String, Object> data = (Map<String, Object>) response.get("data");
-                boolean enabled = Boolean.TRUE.equals(data.get("enabled"));
-                // ⚠️ Do NOT backfill cache — see design doc
-                return enabled;
-            }
-        } catch (Exception e) {
-            log.warn("Remote evaluate failed for appId={}, flagKey={}: {}",
-                    appId, flagKey, e.getMessage());
-        }
-        return false;
+        // ⚠️ Do NOT backfill cache — see design doc
+        return remoteEvaluator.evaluate(appId, flagKey, userId, attributes);
     }
 }
