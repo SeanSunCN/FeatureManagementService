@@ -31,7 +31,7 @@ app:
   clickhouse:
     # 8123 = ClickHouse HTTP protocol port (JDBC driver uses HTTP)
     # Native protocol port is 9000 (mapped to 19000 on NAS host)
-    url: jdbc:clickhouse://${CLICKHOUSE_HOST:192.168.5.66}:${CLICKHOUSE_PORT:8123}/dev
+    url: jdbc:clickhouse://${CLICKHOUSE_HOST:192.168.5.66}:${CLICKHOUSE_PORT:8123}/flag
     username: ${CLICKHOUSE_USERNAME:dev}
     password: ${CLICKHOUSE_PASSWORD:E96I3N6RokvAujGXWghCBcfL}
     driver-class: com.clickhouse.jdbc.ClickHouseDriver

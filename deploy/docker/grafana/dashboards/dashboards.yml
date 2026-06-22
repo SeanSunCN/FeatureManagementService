@@ -1,0 +1,18 @@
+# ============================================================
+# Feature Management Service — Grafana Dashboard Provisioning
+# ============================================================
+# Auto-registered on Grafana startup via volume mount.
+# Path inside container: /etc/grafana/provisioning/dashboards/dashboards.yml
+# ============================================================
+
+apiVersion: 1
+
+providers:
+  - name: 'Feature Management Service'
+    orgId: 1
+    folder: 'Feature Management'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

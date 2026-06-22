@@ -118,9 +118,9 @@ services:
       CLICKHOUSE_USER: dev
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-dev123}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    # Healthcheck with authenticationMENT: 1\n    # Healthcheck with authentication credentials"
     volumes:
       - clickhousedata:/var/lib/clickhouse
+      - ../scripts/clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8123/ping || exit 1"]
       interval: 5s
@@ -166,10 +166,11 @@ services:
     environment:
       - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=Test123123123
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
       - ./grafana:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafanadata:/var/lib/grafana
     depends_on:
       prometheus:

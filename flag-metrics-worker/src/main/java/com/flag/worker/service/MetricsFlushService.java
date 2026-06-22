@@ -103,7 +103,7 @@ public class MetricsFlushService {
     private void flushBatch(List<Object[]> batchArgs, List<String> keysToDelete) {
         try {
             String sql = """
-                    INSERT INTO flag_hit_metrics (app_id, flag_key, hits, eval_count, recorded_at)
+                    INSERT INTO flag.flag_hit_metrics (app_id, flag_key, hits, eval_count, recorded_at)
                     VALUES (?, ?, ?, ?, toDateTime(? / 1000))
                     """;
 

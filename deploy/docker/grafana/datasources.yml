@@ -24,13 +24,14 @@ datasources:
   #          results, flag-to-user attribution, behavioral patterns over time.
   # Plugin: grafana-clickhouse-datasource (auto-installed via GF_INSTALL_PLUGINS)
   - name: ClickHouse
+    uid: clickhouse
     type: grafana-clickhouse-datasource
     access: proxy
     url: http://flag-clickhouse:8123
     isDefault: false
     editable: false
     jsonData:
-      defaultDatabase: dev
+      defaultDatabase: flag
       port: 8123
       username: dev
       tlsAuth: false

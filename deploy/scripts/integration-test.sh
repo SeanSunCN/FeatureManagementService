@@ -92,9 +92,9 @@ batch_count=$(get_json | grep -o '"flagKey"' | wc -l)
 header "6/9  Ingest Metrics and Audit Logs"
 http_code=$(call_api POST "$INGEST_SERVICE/api/v1/ingest/metrics" '{"appId":"integration-test-app","flagHitCounts":{"flag-a":10,"flag-b":5,"flag-c":0}}')
 [ "$http_code" = "200" ] && pass "Report Metrics" || fail "Report Metrics" "HTTP=$http_code"
-http_code=$(call_api POST "$INGEST_SERVICE/api/v1/ingest/audit-log" '{"appId":"integration-test-app","flagKey":"flag-a","userId":"user-001","enabled":true,"clientIp":"192.168.1.100"}')
+http_code=$(call_api POST "$INGEST_SERVICE/api/v1/ingest/audit-log" '{"appId":"integration-test-app","flagKey":"flag-a","userId":"user-001","enabled":true,"clientIp":"192.168.1.100","evalCostNs":1250000}')
 [ "$http_code" = "200" ] && pass "Report audit log (single)" || fail "Report audit log (single)" "HTTP=$http_code"
-http_code=$(call_api POST "$INGEST_SERVICE/api/v1/ingest/audit-log/batch" '[{"appId":"integration-test-app","flagKey":"flag-a","userId":"user-001","enabled":true,"clientIp":"10.0.0.1"},{"appId":"integration-test-app","flagKey":"flag-b","userId":"user-002","enabled":true,"clientIp":"10.0.0.2"},{"appId":"integration-test-app","flagKey":"flag-c","userId":"user-003","enabled":false,"clientIp":"10.0.0.3"}]')
+http_code=$(call_api POST "$INGEST_SERVICE/api/v1/ingest/audit-log/batch" '[{"appId":"integration-test-app","flagKey":"flag-a","userId":"user-001","enabled":true,"clientIp":"10.0.0.1","evalCostNs":850000},{"appId":"integration-test-app","flagKey":"flag-b","userId":"user-002","enabled":true,"clientIp":"10.0.0.2","evalCostNs":1200000},{"appId":"integration-test-app","flagKey":"flag-c","userId":"user-003","enabled":false,"clientIp":"10.0.0.3","evalCostNs":300000}]')
 [ "$http_code" = "200" ] && pass "Report audit logs (batch 3)" || fail "Report audit logs (batch)" "HTTP=$http_code"
 http_code=$(call_api GET "$INGEST_SERVICE/api/v1/ingest/drop-total")
 drop=$(get_json | grep -o '"data":[0-9]*' | cut -d: -f2)

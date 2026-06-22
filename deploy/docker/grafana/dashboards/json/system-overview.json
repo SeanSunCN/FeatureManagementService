@@ -1,0 +1,169 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "title": "System Overview — Prometheus",
+  "uid": "flag-system-overview",
+  "version": 1,
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "tags": ["flag-management", "prometheus"],
+  "panels": [
+    {
+      "title": "Request Rate (RPS) by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "targets": [{
+        "expr": "rate(http_server_requests_seconds_count{service=~\"flag-.*\"}[1m])",
+        "legendFormat": "{{service}} — {{method}} {{uri}}",
+        "interval": ""
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "rps",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "title": "P99 Latency by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [{
+        "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{service=~\"flag-.*\"}[5m]))",
+        "legendFormat": "{{service}} — {{method}} {{uri}}",
+        "interval": ""
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "title": "Error Rate (4xx/5xx)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(http_server_requests_seconds_count{service=~\"flag-.*\",status=~\"4..\"}[5m]) * 100 / rate(http_server_requests_seconds_count{service=~\"flag-.*\"}[5m])",
+          "legendFormat": "4xx — {{service}}",
+          "interval": ""
+        },
+        {
+          "expr": "rate(http_server_requests_seconds_count{service=~\"flag-.*\",status=~\"5..\"}[5m]) * 100 / rate(http_server_requests_seconds_count{service=~\"flag-.*\"}[5m])",
+          "legendFormat": "5xx — {{service}}",
+          "interval": ""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": { "mode": "palette-classic" },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "title": "JVM Heap Usage by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [{
+        "expr": "jvm_memory_used_bytes{service=~\"flag-.*\",area=\"heap\"}",
+        "legendFormat": "{{service}} — {{id}}",
+        "interval": ""
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "title": "CPU Usage per Service",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [{
+        "expr": "process_cpu_usage{service=~\"flag-.*\"}",
+        "legendFormat": "{{service}}",
+        "interval": ""
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": { "mode": "palette-classic" },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "title": "Active HikariCP Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [{
+        "expr": "hikaricp_connections_active{service=~\"flag-.*\"}",
+        "legendFormat": "{{service}} — {{pool}}",
+        "interval": ""
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "title": "GC Pause Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [{
+        "expr": "rate(jvm_gc_pause_seconds_sum{service=~\"flag-.*\"}[1m])",
+        "legendFormat": "{{service}} — {{cause}}",
+        "interval": ""
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      }
+    }
+  ]
+}
