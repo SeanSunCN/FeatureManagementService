@@ -67,13 +67,19 @@ when concurrent admin actions occur.
 - Docker + Docker Compose
 - Java 21 (for AdminRuleService, optional for demo)
 
-### Step 1: Start pseudo-CDN
+### Step 1: Start pseudo-CDN (standalone Nginx)
 ```bash
 cd feature-flag-web-cdn
-docker compose up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 Nginx is now serving on http://localhost:8080
+
+### Step 1b: Start with admin backend
+```bash
+docker compose up -d           # flag-admin
+docker compose -f docker-compose.yml up -d   # CDN Nginx
+```
 
 ### Step 2: Open the demo page
 Open http://localhost:8080/index.html in your browser.

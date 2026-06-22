@@ -2,7 +2,7 @@
 # ============================================================
 # Feature Management Service — Server-side Deploy Script
 # ============================================================
-# This script runs on the Alibaba Cloud server.
+# This script runs on the docker.
 # It is invoked by:
 #   - GitHub Actions (.github/workflows/deploy.yml)
 #   - Manually: bash deploy/scripts/deploy.sh
@@ -57,14 +57,14 @@ echo "      Build complete."
 # ---------- 3. Build Docker images ----------
 echo ""
 echo "[3/5] Building Docker images..."
-docker compose -f deploy/docker/docker-compose.cloud.yml build --pull
+docker compose -f deploy/docker/docker-compose.yml build --pull
 
 echo "      Docker images built."
 
 # ---------- 4. Restart containers ----------
 echo ""
 echo "[4/5] Restarting containers..."
-docker compose -f deploy/docker/docker-compose.cloud.yml up -d --remove-orphans
+docker compose -f deploy/docker/docker-compose.yml up -d --remove-orphans
 
 echo "      Containers restarted."
 
@@ -81,7 +81,7 @@ for port in 8080 8081 8082 8083; do
     echo "  [OK] Port $port — HEALTHY"
   else
     echo "  [WARN] Port $port — HTTP $STATUS (may still be starting)"
-    docker compose -f deploy/docker/docker-compose.cloud.yml logs --tail=5 "$(docker compose -f deploy/docker/docker-compose.cloud.yml ps --services | grep -m1 .)" 2>/dev/null || true
+    docker compose -f deploy/docker/docker-compose.yml logs --tail=5 "$(docker compose -f deploy/docker/docker-compose.yml ps --services | grep -m1 .)" 2>/dev/null || true
     ALL_OK=false
   fi
 done

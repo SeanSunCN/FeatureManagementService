@@ -1,15 +1,16 @@
-package com.flag.eval.rule;
+package com.flag.admin.cdn;
 
 import com.flag.common.model.FlagConfig;
 
+import java.util.List;
 import java.util.Map;
 
 /**
  * Lightweight DTO representing a flag that is safe to publish to the client-side CDN.
  *
- * <p>Only flags with {@code safe_for_client: true} in their metadata produce
+ * <p>Only flags with {@code safe_for_client = true} in the database produce
  * a {@link ClientFlagMetadata} instance. All server-only flags are pruned
- * at compile time — they never leave the backend.</p>
+ * at the SQL query level — they never leave the backend.</p>
  *
  * @param flagKey          unique flag identifier
  * @param enabled          global enabled state
@@ -20,7 +21,7 @@ public record ClientFlagMetadata(
         String flagKey,
         boolean enabled,
         boolean defaultServeValue,
-        java.util.List<Map<String, Object>> rules
+        List<Map<String, Object>> rules
 ) {
 
     /**
@@ -28,13 +29,13 @@ public record ClientFlagMetadata(
      * safe for client exposure.
      */
     public static ClientFlagMetadata from(FlagConfig config) {
-        java.util.List<Map<String, Object>> ruleMaps = config.getRules() != null
+        List<Map<String, Object>> ruleMaps = config.getRules() != null
                 ? config.getRules().stream()
-                .map(r -> java.util.Map.of(
+                .map(r -> Map.of(
                         "ruleName", r.getRuleName(),
                         "serveValue", r.isServeValue(),
                         "conditions", r.getConditions().stream()
-                                .map(c -> java.util.Map.of(
+                                .map(c -> Map.of(
                                         "attribute", c.getAttribute(),
                                         "operator", c.getOperator().name(),
                                         "values", c.getValues()
@@ -42,7 +43,7 @@ public record ClientFlagMetadata(
                                 .toList()
                 ))
                 .toList()
-                : java.util.List.of();
+                : List.of();
 
         return new ClientFlagMetadata(
                 config.getFlagKey(),

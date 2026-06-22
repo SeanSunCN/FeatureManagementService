@@ -42,4 +42,7 @@ public class FlagUpdateRequest {
      */
     @Valid
     private List<EvaluationRule> rules;
+
+    /** Safe for client-side (Web SDK) exposure: false=server-only, true=allow frontend pull */
+    private Boolean safeForClient;
 }

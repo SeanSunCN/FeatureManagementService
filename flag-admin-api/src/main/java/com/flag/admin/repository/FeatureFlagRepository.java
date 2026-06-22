@@ -16,6 +16,10 @@ public interface FeatureFlagRepository extends JpaRepository<FeatureFlagEntity, 
 
     List<FeatureFlagEntity> findByAppIdAndEnabledTrue(String appId);
 
+    List<FeatureFlagEntity> findBySafeForClientTrue();
+
+    List<FeatureFlagEntity> findByAppIdAndSafeForClientTrue(String appId);
+
     boolean existsByAppIdAndFlagKey(String appId, String flagKey);
 
     long deleteByAppId(String appId);

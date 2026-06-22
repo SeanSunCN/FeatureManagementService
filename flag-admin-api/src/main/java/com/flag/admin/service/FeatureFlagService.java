@@ -1,5 +1,6 @@
 package com.flag.admin.service;
 
+import com.flag.admin.cdn.CdnSnapshotService;
 import com.flag.admin.dto.CreateFlagRequest;
 import com.flag.admin.dto.FlagUpdateRequest;
 import com.flag.admin.entity.FeatureFlagEntity;
@@ -43,15 +44,18 @@ public class FeatureFlagService {
     private final FlagOutboxRepository outboxRepository;
     private final AppService appService;
     private final FlagChangePublisher publisher;
+    private final CdnSnapshotService cdnSnapshotService;
 
     public FeatureFlagService(FeatureFlagRepository featureFlagRepository,
                               FlagOutboxRepository outboxRepository,
                               AppService appService,
-                              FlagChangePublisher publisher) {
+                              FlagChangePublisher publisher,
+                              CdnSnapshotService cdnSnapshotService) {
         this.featureFlagRepository = featureFlagRepository;
         this.outboxRepository = outboxRepository;
         this.appService = appService;
         this.publisher = publisher;
+        this.cdnSnapshotService = cdnSnapshotService;
     }
 
     public List<FeatureFlagEntity> listByAppId(String appId) {
@@ -91,13 +95,19 @@ public class FeatureFlagService {
                 request.getDescription(),
                 request.getGlobalEnabled(),
                 ruleConfigJson,
+                request.getSafeForClient(),
                 null  // createdBy = null (not exposed via API)
         );
 
         FeatureFlagEntity saved = featureFlagRepository.save(entity);
         writeOutbox(ChangeType.CREATE, appId, request.getFlagKey(), saved.getVersion().longValue());
-        log.info("FeatureFlag created from DTO: appId={}, flagKey={}, version={}",
-                appId, request.getFlagKey(), saved.getVersion());
+        log.info("FeatureFlag created from DTO: appId={}, flagKey={}, version={}, safeForClient={}",
+                appId, request.getFlagKey(), saved.getVersion(), saved.getSafeForClient());
+
+        // CDN snapshot: publish if the flag is client-safe
+        if (Boolean.TRUE.equals(saved.getSafeForClient())) {
+            cdnSnapshotService.publishAllSafeFlags();
+        }
     }
 
     /**
@@ -114,6 +124,11 @@ public class FeatureFlagService {
         existing.setDescription(request.getDescription());
         existing.setEnabled(request.getGlobalEnabled());
 
+        // safeForClient: only update if present in the request
+        if (request.getSafeForClient() != null) {
+            existing.setSafeForClient(request.getSafeForClient());
+        }
+
         // Serialize the rules list to JSON and store in ruleConfig
         String ruleConfigJson = serializeRules(request.getRules(), request.isDefaultStrategy());
         RuleConfigValidator.validate(ruleConfigJson);
@@ -121,8 +136,11 @@ public class FeatureFlagService {
 
         FeatureFlagEntity saved = featureFlagRepository.save(existing);
         writeOutbox(ChangeType.UPDATE, appId, flagKey, saved.getVersion().longValue());
-        log.info("FeatureFlag updated from DTO: appId={}, flagKey={}, newVersion={}",
-                appId, flagKey, saved.getVersion());
+        log.info("FeatureFlag updated from DTO: appId={}, flagKey={}, newVersion={}, safeForClient={}",
+                appId, flagKey, saved.getVersion(), saved.getSafeForClient());
+
+        // CDN snapshot: always republish since safe_for_client or rules may have changed
+        cdnSnapshotService.publishAllSafeFlags();
     }
 
     // ========================================================================
@@ -142,10 +160,17 @@ public class FeatureFlagService {
             throw new BusinessException(ErrorCode.FLAG_KEY_CONFLICT);
         }
         RuleConfigValidator.validate(flag.getRuleConfig());
+        if (flag.getSafeForClient() == null) {
+            flag.setSafeForClient(false);
+        }
         FeatureFlagEntity saved = featureFlagRepository.save(flag);
         writeOutbox(ChangeType.CREATE, saved.getAppId(), saved.getFlagKey(), saved.getVersion().longValue());
         log.info("FeatureFlag created: appId={}, flagKey={}, version={}",
                 saved.getAppId(), saved.getFlagKey(), saved.getVersion());
+
+        if (Boolean.TRUE.equals(saved.getSafeForClient())) {
+            cdnSnapshotService.publishAllSafeFlags();
+        }
         return saved;
     }
 
@@ -161,20 +186,31 @@ public class FeatureFlagService {
         existing.setName(update.getName());
         existing.setDescription(update.getDescription());
         existing.setEnabled(update.getEnabled());
+        if (update.getSafeForClient() != null) {
+            existing.setSafeForClient(update.getSafeForClient());
+        }
         RuleConfigValidator.validate(update.getRuleConfig());
         existing.setRuleConfig(update.getRuleConfig());
         FeatureFlagEntity saved = featureFlagRepository.save(existing);
         writeOutbox(ChangeType.UPDATE, appId, flagKey, saved.getVersion().longValue());
         log.info("FeatureFlag updated: appId={}, flagKey={}, newVersion={}", appId, flagKey, saved.getVersion());
+
+        cdnSnapshotService.publishAllSafeFlags();
         return saved;
     }
 
     @Transactional
     public void delete(String appId, String flagKey) {
         FeatureFlagEntity existing = getByAppIdAndFlagKey(appId, flagKey);
+        boolean wasSafeForClient = Boolean.TRUE.equals(existing.getSafeForClient());
         featureFlagRepository.delete(existing);
         writeOutbox(ChangeType.DELETE, appId, flagKey, existing.getVersion().longValue());
         log.info("FeatureFlag deleted: appId={}, flagKey={}", appId, flagKey);
+
+        // CDN snapshot: republish since a safe flag may have been removed
+        if (wasSafeForClient) {
+            cdnSnapshotService.publishAllSafeFlags();
+        }
     }
 
     @Transactional
@@ -185,6 +221,11 @@ public class FeatureFlagService {
         writeOutbox(enabled ? ChangeType.ENABLE : ChangeType.DISABLE,
                 appId, flagKey, saved.getVersion().longValue());
         log.info("FeatureFlag {}: appId={}, flagKey={}", enabled ? "enabled" : "disabled", appId, flagKey);
+
+        // CDN snapshot: publish if this flag is client-safe
+        if (Boolean.TRUE.equals(saved.getSafeForClient())) {
+            cdnSnapshotService.publishAllSafeFlags();
+        }
         return saved;
     }
 
@@ -193,6 +234,9 @@ public class FeatureFlagService {
         appService.getByAppId(appId);
         writeOutbox(ChangeType.RELOAD, appId, null, 0L);
         log.info("Reload triggered for appId={}", appId);
+
+        // CDN snapshot: republish all safe flags on reload
+        cdnSnapshotService.publishAllSafeFlags();
     }
 
     // ========================================================================

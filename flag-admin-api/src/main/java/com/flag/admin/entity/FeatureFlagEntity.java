@@ -71,6 +71,10 @@ public class FeatureFlagEntity {
     @Column(name = "version", nullable = false)
     private Integer version = 0;
 
+    /** Safe for client-side (Web SDK) exposure: false=server-only, true=allow frontend pull */
+    @Column(name = "safe_for_client", nullable = false)
+    private Boolean safeForClient = false;
+
     /** Created by */
     @Column(name = "created_by", length = 64)
     private String createdBy;
@@ -84,13 +88,14 @@ public class FeatureFlagEntity {
     private Instant updatedAt;
 
     public FeatureFlagEntity(String appId, String flagKey, String name, String description,
-                             Boolean enabled, String ruleConfig, String createdBy) {
+                             Boolean enabled, String ruleConfig, Boolean safeForClient, String createdBy) {
         this.appId = appId;
         this.flagKey = flagKey;
         this.name = name;
         this.description = description;
         this.enabled = enabled;
         this.ruleConfig = ruleConfig;
+        this.safeForClient = safeForClient != null ? safeForClient : false;
         this.createdBy = createdBy;
         this.version = 0;
     }

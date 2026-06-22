@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS flag_feature (
     description     VARCHAR(1024),
     enabled         BOOLEAN      NOT NULL DEFAULT FALSE,
     rule_config     JSONB,
+    safe_for_client BOOLEAN      NOT NULL DEFAULT FALSE,
     version         INTEGER      NOT NULL DEFAULT 0,
     created_by      VARCHAR(64),
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
