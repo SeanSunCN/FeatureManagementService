@@ -554,15 +554,13 @@ public class HeavyFlagClient implements FlagSdkClient {
     }
 
     @Override
-    public List<EvaluateResponse> evaluateBatch(String appId, List<EvaluateRequest> requests) {
-        if (!this.appId.equals(appId)) {
-            log.warn("Batch evaluate appId mismatch: client={}, requested={}", this.appId, appId);
-        }
+    public List<EvaluateResponse> evaluateBatch(List<EvaluateRequest> requests) {
         if (shutdown.get()) return List.of();
+        if (requests == null || requests.isEmpty()) return List.of();
 
         List<EvaluateResponse> results = new ArrayList<>(requests.size());
         for (EvaluateRequest req : requests) {
-            boolean enabled = isEnabled(this.appId, req.getFlagKey(), req.getUserId(), req.getAttributes());
+            boolean enabled = isEnabled(req.getAppId(), req.getFlagKey(), req.getUserId(), req.getAttributes());
             results.add(EvaluateResponse.of(req.getFlagKey(), enabled));
         }
         return results;

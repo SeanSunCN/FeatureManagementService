@@ -47,10 +47,13 @@ public class EvalController {
      */
     @PostMapping("/evaluate/batch")
     public Mono<UnifiedResponse<List<EvaluateResponse>>> evaluateBatch(
-            @RequestParam String appId,
             @RequestBody List<EvaluateRequest> requests) {
         return Mono.fromCallable(() -> {
-            List<EvaluateResponse> results = engine.evaluateBatch(appId, requests);
+            if (requests == null || requests.isEmpty()) {
+                return UnifiedResponse.success(List.of());
+            }
+            // Each request carries its own appId; engine parses it internally
+            List<EvaluateResponse> results = engine.evaluateBatch(requests);
             return UnifiedResponse.success(results);
         });
     }

@@ -16,11 +16,25 @@
     <packaging>jar</packaging>
     <description>Pure interface abstraction layer — zero external dependencies</description>
 
-    <!-- 零外部依赖：仅依赖 flag-common 的传输 DTO -->
+    <!-- 零外部依赖：仅依赖 flag-common 的传输 DTO，排除 Spring/Tomcat -->
     <dependencies>
         <dependency>
             <groupId>com.flag</groupId>
             <artifactId>flag-common</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-web</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework</groupId>
+                    <artifactId>spring-tx</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.networknt</groupId>
+                    <artifactId>json-schema-validator</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 

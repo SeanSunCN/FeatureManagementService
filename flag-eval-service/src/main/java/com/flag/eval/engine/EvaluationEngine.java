@@ -121,14 +121,12 @@ public class EvaluationEngine {
     }
 
     /**
-     * Batch evaluate multiple flags under the same App.
+     * Batch evaluate multiple flags.
+     * Each EvaluateRequest carries its own appId — no separate parameter needed.
      */
-    public List<EvaluateResponse> evaluateBatch(String appId, List<EvaluateRequest> requests) {
+    public List<EvaluateResponse> evaluateBatch(List<EvaluateRequest> requests) {
         return requests.stream()
-                .map(r -> {
-                    r.setAppId(appId);
-                    return evaluate(r);
-                })
+                .map(this::evaluate)
                 .toList();
     }
 

@@ -82,7 +82,7 @@ enabled=$(get_json | grep -o '"enabled":[^,}]*' | head -1 | cut -d: -f2)
 http_code=$(call_api POST "$EVAL_SERVICE/api/v1/eval/evaluate" '{"appId":"integration-test-app","flagKey":"flag-c","userId":"user-001"}')
 enabled=$(get_json | grep -o '"enabled":[^,}]*' | head -1 | cut -d: -f2)
 [ "$enabled" = "false" ] && pass "flag-c evaluate: enabled=false" || fail "flag-c evaluate" "enabled=$enabled"
-http_code=$(call_api POST "$EVAL_SERVICE/api/v1/eval/evaluate/batch?appId=integration-test-app" '[{"flagKey":"flag-a","userId":"user-001"},{"flagKey":"flag-b","userId":"user-002"},{"flagKey":"flag-c","userId":"user-003"}]')
+http_code=$(call_api POST "$EVAL_SERVICE/api/v1/eval/evaluate/batch" '[{"appId":"integration-test-app","flagKey":"flag-a","userId":"user-001"},{"appId":"integration-test-app","flagKey":"flag-b","userId":"user-002"},{"appId":"integration-test-app","flagKey":"flag-c","userId":"user-003"}]')
 batch_count=$(get_json | grep -o '"flagKey"' | wc -l)
 [ "$batch_count" = "3" ] && pass "Batch evaluate 3 Flags" || fail "Batch evaluate" "returned count=$batch_count"
 

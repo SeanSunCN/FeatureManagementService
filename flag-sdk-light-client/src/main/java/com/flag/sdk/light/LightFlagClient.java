@@ -36,14 +36,14 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
     private static final Duration INGEST_TIMEOUT = Duration.ofSeconds(3);
     private static final long FLUSH_INTERVAL_SECONDS = 5;
     private static final boolean DEFAULT_RESULT = false;
+    /** IngestService metrics endpoint — shared by periodic flush and shutdown flush */
+    private static final String METRICS_ENDPOINT = "http://localhost:8082/api/v1/ingest/metrics";
 
     // ============================================================
     // Immutable configuration
     // ============================================================
 
-    private final String appId;
     private final String evalServiceUrl;
-    private final String ingestServiceUrl;
     private final boolean defaultResult;
 
     // ============================================================
@@ -55,38 +55,30 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
     // ============================================================
     // Global aggregator — shared across all LightFlagClient instances
     // Single daemon thread, single HTTP client, batches ALL app counters
+    // Stateless: appId is passed at method call time, not bound to instance.
     // ============================================================
 
     private static final GlobalMetricsAggregator aggregator = new GlobalMetricsAggregator();
 
     static {
         // JVM Shutdown Hook: ensures remaining counts are flushed on JVM exit
-        // This prevents metrics data loss when the application terminates without explicitly calling shutdownAll()
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            aggregator.shutdown();
-        }, "flag-metrics-shutdown-hook"));
+        Runtime.getRuntime().addShutdownHook(new Thread(aggregator::shutdown, "flag-metrics-shutdown-hook"));
     }
 
     // ============================================================
-    // Constructor
+    // Constructor — stateless, no appId binding
     // ============================================================
 
-    public LightFlagClient(String appId, String evalServiceUrl,
-                           String ingestServiceUrl, boolean defaultResult) {
-        this.appId = Objects.requireNonNull(appId, "appId must not be null");
+    public LightFlagClient(String evalServiceUrl, boolean defaultResult) {
         this.evalServiceUrl = Objects.requireNonNull(evalServiceUrl, "evalServiceUrl must not be null");
-        this.ingestServiceUrl = Objects.requireNonNull(ingestServiceUrl, "ingestServiceUrl must not be null");
         this.defaultResult = defaultResult;
-
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
-
-        aggregator.registerClient(appId, ingestServiceUrl, httpClient);
     }
 
-    public LightFlagClient(String appId, String evalServiceUrl, String ingestServiceUrl) {
-        this(appId, evalServiceUrl, ingestServiceUrl, DEFAULT_RESULT);
+    public LightFlagClient(String evalServiceUrl) {
+        this(evalServiceUrl, DEFAULT_RESULT);
     }
 
     // ============================================================
@@ -152,13 +144,124 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
     }
 
     @Override
-    public List<EvaluateResponse> evaluateBatch(String appId, List<EvaluateRequest> requests) {
+    public List<EvaluateResponse> evaluateBatch(List<EvaluateRequest> requests) {
+        if (requests == null || requests.isEmpty()) return List.of();
+
+        try {
+            // Batch POST: one HTTP call for N flags
+            // appId is carried inside each EvaluateRequest body, not in URL
+            // EvalService: POST /api/v1/eval/evaluate/batch
+            StringBuilder body = new StringBuilder(requests.size() * 128);
+            body.append('[');
+            for (int i = 0; i < requests.size(); i++) {
+                EvaluateRequest req = requests.get(i);
+                if (i > 0) body.append(',');
+                String appId = req.getAppId();
+                body.append("{\"appId\":\"").append(escapeJson(appId))
+                    .append("\",\"flagKey\":\"").append(escapeJson(req.getFlagKey()))
+                    .append("\",\"userId\":\"").append(escapeJson(req.getUserId() != null ? req.getUserId() : ""))
+                    .append("\"");
+                if (req.getAttributes() != null && !req.getAttributes().isEmpty()) {
+                    body.append(",\"attributes\":{");
+                    boolean first = true;
+                    for (Map.Entry<String, String> e : req.getAttributes().entrySet()) {
+                        if (!first) body.append(',');
+                        first = false;
+                        body.append("\"").append(escapeJson(e.getKey()))
+                            .append("\":\"").append(escapeJson(e.getValue() != null ? e.getValue() : ""))
+                            .append("\"");
+                    }
+                    body.append('}');
+                }
+                body.append('}');
+            }
+            body.append(']');
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(evalServiceUrl + "/api/v1/eval/evaluate/batch"))
+                    .header("Content-Type", "application/json")
+                    .timeout(EVAL_TIMEOUT)
+                    .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request,
+                    HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200 && response.body() != null) {
+                // Parse batch response: UnifiedResponse<List<EvaluateResponse>>
+                // Extract "data" array from the JSON response
+                List<EvaluateResponse> results = parseBatchResult(response.body());
+                if (results != null && !results.isEmpty()) {
+                    // Accumulate metrics for enabled flags
+                    // Use the appId from the first request since all share the same appId
+                    String batchAppId = requests.getFirst().getAppId();
+                    for (EvaluateResponse r : results) {
+                        if (r.isEnabled()) {
+                            aggregator.increment(batchAppId, r.getFlagKey());
+                        }
+                    }
+                    return results;
+                }
+            }
+        } catch (Exception e) {
+            // Fallback to single evaluations on batch failure
+        }
+
+        // Fallback: sequential single evaluations
         List<EvaluateResponse> results = new ArrayList<>(requests.size());
         for (EvaluateRequest req : requests) {
-            boolean enabled = isEnabled(appId, req.getFlagKey(), req.getUserId(), req.getAttributes());
+            boolean enabled = isEnabled(req.getAppId(), req.getFlagKey(), req.getUserId(), req.getAttributes());
             results.add(EvaluateResponse.of(req.getFlagKey(), enabled));
         }
         return results;
+    }
+
+    /**
+     * Parse the batch result JSON from UnifiedResponse wrapper.
+     * Returns null on any parse error (triggers single-eval fallback).
+     */
+    private static List<EvaluateResponse> parseBatchResult(String json) {
+        // Find "data":[{...}] array
+        int dataStart = json.indexOf("\"data\":");
+        if (dataStart < 0) return null;
+        dataStart += 7; // skip past "data":
+        // Skip whitespace
+        while (dataStart < json.length() && json.charAt(dataStart) == ' ') dataStart++;
+        if (dataStart >= json.length() || json.charAt(dataStart) != '[') return null;
+
+        // Find the matching closing bracket
+        int depth = 0;
+        int arrayEnd = -1;
+        for (int i = dataStart; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '[') depth++;
+            else if (c == ']') {
+                depth--;
+                if (depth == 0) { arrayEnd = i + 1; break; }
+            }
+        }
+        if (arrayEnd < 0) return null;
+
+        String arrayJson = json.substring(dataStart, arrayEnd);
+        // Simple parser for array of objects with "flagKey" and "enabled"
+        List<EvaluateResponse> results = new ArrayList<>();
+        int pos = 0;
+        while (pos < arrayJson.length()) {
+            int objStart = arrayJson.indexOf('{', pos);
+            if (objStart < 0) break;
+            int objEnd = arrayJson.indexOf('}', objStart);
+            if (objEnd < 0) break;
+            String obj = arrayJson.substring(objStart, objEnd + 1);
+
+            String flagKey = extractJsonString(obj, "flagKey");
+            boolean enabled = extractJsonBool(obj, "enabled");
+            if (flagKey != null) {
+                results.add(EvaluateResponse.of(flagKey, enabled));
+            }
+
+            pos = objEnd + 1;
+        }
+        return results.isEmpty() ? null : results;
     }
 
     // ============================================================
@@ -172,6 +275,15 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
                 = new ConcurrentHashMap<>();
         private final ScheduledExecutorService scheduler;
 
+        /**
+         * Shared singleton HttpClient for all flush operations.
+         * Created once, reused for the lifetime of the JVM.
+         * Eliminates the overhead of creating a new HttpClient per flush cycle.
+         */
+        private static final HttpClient SHARED_HTTP_CLIENT = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(2))
+                .build();
+
         GlobalMetricsAggregator() {
             scheduler = new ScheduledThreadPoolExecutor(1, r -> {
                 Thread t = new Thread(r, "flag-global-metrics-flusher");
@@ -183,14 +295,6 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
                     FLUSH_INTERVAL_SECONDS,
                     FLUSH_INTERVAL_SECONDS,
                     TimeUnit.SECONDS);
-        }
-
-        void registerClient(String appId, String ingestServiceUrl, HttpClient httpClient) {
-            counters.computeIfAbsent(appId, k -> new ConcurrentHashMap<>());
-        }
-
-        void deregister(String appId) {
-            counters.remove(appId);
         }
 
         void increment(String appId, String flagKey) {
@@ -228,14 +332,14 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
                     body.append("}}");
 
                     HttpRequest request = HttpRequest.newBuilder()
-                            .uri(URI.create("http://localhost:8082/api/v1/ingest/metrics"))
+                            .uri(URI.create(METRICS_ENDPOINT))
                             .header("Content-Type", "application/json")
                             .timeout(INGEST_TIMEOUT)
                             .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                             .build();
 
                     // Each appId gets its own POST, but all share the same scheduler and timer
-                    HttpClient.newHttpClient()
+                    SHARED_HTTP_CLIENT
                             .sendAsync(request, HttpResponse.BodyHandlers.ofString());
                 } catch (Exception e) {
                     // Swallow
@@ -295,14 +399,14 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
                     body.append("}}");
 
                     HttpRequest request = HttpRequest.newBuilder()
-                            .uri(URI.create("http://localhost:8082/api/v1/ingest/metrics"))
+                            .uri(URI.create(METRICS_ENDPOINT))
                             .header("Content-Type", "application/json")
                             .timeout(INGEST_TIMEOUT)
                             .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                             .build();
 
                     // BLOCKING send — guarantees delivery before shutdown proceeds
-                    HttpClient.newHttpClient()
+                    SHARED_HTTP_CLIENT
                             .send(request, HttpResponse.BodyHandlers.ofString());
                 } catch (Exception e) {
                     // Swallow — best-effort on shutdown path
@@ -317,7 +421,8 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
 
     @Override
     public void close() {
-        aggregator.deregister(appId);
+        // No-op: LightFlagClient is stateless, no per-instance state to release.
+        // Global aggregator shutdown is handled by JVM shutdown hook.
     }
 
     public static void shutdownAll() {
@@ -339,6 +444,53 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
         if (start < json.length() && json.charAt(start) == 't') return true;
         if (start < json.length() && json.charAt(start) == 'f') return false;
         return false;
+    }
+
+    /**
+     * Extract a String value for a key from a JSON object.
+     * e.g. extractJsonString("{\"flagKey\":\"flag-a\"}", "flagKey") -> "flag-a"
+     */
+    private static String extractJsonString(String json, String key) {
+        String search = "\"" + key + "\":\"";
+        int start = json.indexOf(search);
+        if (start < 0) return null;
+        start += search.length();
+        int end = json.indexOf('"', start);
+        if (end < 0) return null;
+        // Unescape basic sequences
+        String raw = json.substring(start, end);
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '\\' && i + 1 < raw.length()) {
+                char next = raw.charAt(i + 1);
+                switch (next) {
+                    case '"' -> sb.append('"');
+                    case '\\' -> sb.append('\\');
+                    case 'n' -> sb.append('\n');
+                    case 'r' -> sb.append('\r');
+                    case 't' -> sb.append('\t');
+                    default -> sb.append(c).append(next);
+                }
+                i++;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Extract a boolean value for a key from a JSON object.
+     * e.g. extractJsonBool("{\"enabled\":true}", "enabled") -> true
+     */
+    private static boolean extractJsonBool(String json, String key) {
+        String search = "\"" + key + "\":";
+        int idx = json.indexOf(search);
+        if (idx < 0) return false;
+        idx += search.length();
+        while (idx < json.length() && json.charAt(idx) == ' ') idx++;
+        return idx < json.length() && json.charAt(idx) == 't';
     }
 
     static String escapeJson(String s) {

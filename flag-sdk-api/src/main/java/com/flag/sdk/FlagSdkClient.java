@@ -40,10 +40,10 @@ public interface FlagSdkClient {
 
     /**
      * Batch evaluation.
+     * Each EvaluateRequest carries its own appId internally.
      *
-     * @param appId    Application identifier
      * @param requests List of evaluation requests
      * @return List of evaluation results
      */
-    List<EvaluateResponse> evaluateBatch(String appId, List<EvaluateRequest> requests);
+    List<EvaluateResponse> evaluateBatch(List<EvaluateRequest> requests);
 }
