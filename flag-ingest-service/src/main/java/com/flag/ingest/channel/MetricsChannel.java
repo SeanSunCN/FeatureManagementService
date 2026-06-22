@@ -12,34 +12,37 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Metrics async channel — Pool A: Fire & Forget.
+ * Metrics async channel — Pool A: Fire &amp; Forget.
  *
- * Corresponding architecture: MetricsChannel -> HINCRBY memory counter -> Redis
+ * All metrics are written into a single Redis Hash key "flag:metrics".
+ * Field names use compound keys: {@code {appId}:{flagKey}:hits} and {@code :count}.
+ * This enables atomic RENAME-based snapshot at the MetricsWorker side,
+ * eliminating multi-Pod data race without distributed locks.
  *
- * Features:
- * - Fully asynchronous, does not block the caller
- * - Uses Redis EVAL Lua script for atomic HINCRBY (hits + count in one RTT)
- * - When the queue is full, the caller's thread executes (CallerRunsPolicy)
- * - Metrics key format: flag:metrics:{appId}:{flagKey}
+ * Redis key: flag:metrics (single Hash)
+ * Fields:    {appId}:{flagKey}:hits  (counter of flag hits)
+ *            {appId}:{flagKey}:count (number of evaluations)
  */
 @Component
 public class MetricsChannel {
 
     private static final Logger log = LoggerFactory.getLogger(MetricsChannel.class);
 
-    private static final String METRICS_KEY_PREFIX = "flag:metrics:";
+    static final String METRICS_KEY = "flag:metrics";
 
     /**
      * Atomic increment of hits and count in one Redis round-trip.
-     * KEYS[1] = flag:metrics:{appId}:{flagKey}
+     * All writes go to the single Hash key {@link #METRICS_KEY}.
+     * KEYS[1] = "flag:metrics" (the single Hash)
      * ARGV[1] = hits delta
      * ARGV[2] = count delta (always 1)
+     * ARGV[3] = field prefix: "{appId}:{flagKey}"
      */
     private static final DefaultRedisScript<Long> INCR_SCRIPT = new DefaultRedisScript<>();
     static {
         INCR_SCRIPT.setScriptText(
-            "redis.call('HINCRBY', KEYS[1], 'hits', ARGV[1]);" +
-            "redis.call('HINCRBY', KEYS[1], 'count', ARGV[2]);" +
+            "redis.call('HINCRBY', KEYS[1], ARGV[3] .. ':hits',  ARGV[1]);" +
+            "redis.call('HINCRBY', KEYS[1], ARGV[3] .. ':count', ARGV[2]);" +
             "return 1"
         );
         INCR_SCRIPT.setResultType(Long.class);
@@ -52,9 +55,8 @@ public class MetricsChannel {
     }
 
     /**
-     * Asynchronously receives and writes metrics to Redis counters.
+     * Asynchronously receives and writes metrics to the single Redis Hash.
      * Uses @Async("metricsExecutor") to ensure execution in a dedicated thread pool.
-     * Atomic Lua script writes hits + count in a single Redis call (reduced from 2 RTTs to 1).
      */
     @Async("metricsExecutor")
     public void ingest(MetricsReportRequest request) {
@@ -67,19 +69,22 @@ public class MetricsChannel {
             }
 
             for (Map.Entry<String, Long> entry : hitCounts.entrySet()) {
-                String key = METRICS_KEY_PREFIX + appId + ":" + entry.getKey();
                 Long count = entry.getValue();
                 if (count != null && count > 0) {
-                    // Single Redis call instead of two HINCRBY round-trips
-                    stringRedisTemplate.execute(INCR_SCRIPT, List.of(key), count.toString(), "1");
+                    // Single Redis call, one RTT for both hits + count
+                    // KEYS[1] = "flag:metrics", ARGV[3] = "{appId}:{flagKey}"
+                    stringRedisTemplate.execute(INCR_SCRIPT,
+                            List.of(METRICS_KEY),
+                            count.toString(), "1",
+                            appId + ":" + entry.getKey());
                 }
             }
 
             log.debug("Metrics ingested for appId={}, flags={}", appId, hitCounts.size());
 
         } catch (Exception e) {
-            // Fire & Forget: log the error but do not throw an exception
-            log.warn("Metrics ingestion failed (fire & forget): {}", e.getMessage());
+            // Fire &amp; Forget: log the error but do not throw an exception
+            log.warn("Metrics ingestion failed (fire &amp; forget): {}", e.getMessage());
         }
     }
 }
