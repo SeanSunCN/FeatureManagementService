@@ -26,25 +26,21 @@
             <artifactId>flag-common</artifactId>
         </dependency>
 
+        <!-- Pure rule engine — local evaluation without HTTP call -->
+        <dependency>
+            <groupId>com.flag</groupId>
+            <artifactId>flag-engine</artifactId>
+        </dependency>
         <!-- Spring Boot WebFlux (SSE + reactive) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
-
         <!-- Jackson for JSON -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
-
-        <!-- Spring Context (optional auto-wiring) -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
-            <optional>true</optional>
-        </dependency>
-
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

@@ -1,10 +1,8 @@
 package com.flag.eval.cache;
 
 import com.flag.common.dto.FlagChangeMessage;
-import com.flag.common.model.Condition;
-import com.flag.common.model.EvaluationRule;
 import com.flag.common.model.FlagConfig;
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.flag.common.util.RuleConfigParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -13,8 +11,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 /**
  * Pure in-memory rule cache.
@@ -100,54 +96,8 @@ public class FlagCache {
         FlagEntry entry = get(appId, flagKey);
         if (entry == null) return null;
 
-        JsonNode node = entry.ruleConfigNode();
-        FlagConfig.FlagConfigBuilder builder = FlagConfig.builder()
-                .flagKey(entry.flagKey())
-                .globalEnabled(entry.enabled());
-
-        if (node == null || node.isMissingNode()) {
-            return builder.defaultServeValue(false).build();
-        }
-
-        // Try new multi-rule format
-        JsonNode rulesNode = node.path("rules");
-        if (rulesNode.isArray() && rulesNode.size() > 0) {
-            List<EvaluationRule> rules = new ArrayList<>();
-            for (JsonNode r : rulesNode) {
-                List<Condition> conditions = new ArrayList<>();
-                JsonNode condsNode = r.path("conditions");
-                if (condsNode.isArray()) {
-                    for (JsonNode c : condsNode) {
-                        String opStr = c.path("operator").asText("EQUALS");
-                        Condition.Operator op;
-                        try { op = Condition.Operator.valueOf(opStr); }
-                        catch (IllegalArgumentException e) { op = Condition.Operator.EQUALS; }
-
-                        List<String> values = new ArrayList<>();
-                        JsonNode valsNode = c.path("values");
-                        if (valsNode.isArray()) {
-                            valsNode.forEach(v -> values.add(v.asText()));
-                        }
-
-                        conditions.add(Condition.builder()
-                                .attribute(c.path("attribute").asText(null))
-                                .operator(op)
-                                .values(values)
-                                .build());
-                    }
-                }
-                rules.add(EvaluationRule.builder()
-                        .ruleId(r.path("ruleId").asText(null))
-                        .ruleName(r.path("ruleName").asText(null))
-                        .serveValue(r.path("serveValue").asBoolean(false))
-                        .conditions(conditions)
-                        .build());
-            }
-            builder.rules(rules);
-        }
-
-        builder.defaultServeValue(node.path("defaultStrategy").asBoolean(false));
-        return builder.build();
+        // Delegate ruleConfig parsing to the shared RuleConfigParser
+        return RuleConfigParser.parseNode(entry.flagKey(), entry.enabled(), entry.ruleConfigNode());
     }
 
     /**
@@ -193,35 +143,17 @@ public class FlagCache {
         }
 
         /**
-         * Parse ruleConfig JSON string into a JsonNode at construction time.
-         * Returns MissingNode for null/blank/malformed input, so callers
-         * never deal with null and never parse at runtime.
+         * Delegates to shared {@link com.flag.common.util.RuleConfigParser}.
          */
         private static JsonNode parseRuleConfig(String ruleConfig) {
-            if (ruleConfig == null || ruleConfig.isBlank()) {
-                return WHITELIST_MAPPER.getNodeFactory().missingNode();
-            }
-            try {
-                return WHITELIST_MAPPER.readTree(ruleConfig);
-            } catch (JsonProcessingException e) {
-                return WHITELIST_MAPPER.getNodeFactory().missingNode();
-            }
+            return com.flag.common.util.RuleConfigParser.parseToNode(ruleConfig);
         }
 
         /**
-         * Pre-parse the user_ids whitelist from ruleConfig JSON at construction time.
-         * Returns empty set (never null) — evaluation simply does .contains().
+         * Delegates to shared {@link com.flag.common.util.RuleConfigParser}.
          */
         private static Set<String> parseWhitelist(JsonNode root) {
-            if (root == null || root.isMissingNode()) return Collections.emptySet();
-            JsonNode userIds = root.path("user_ids");
-            if (userIds.isArray()) {
-                return StreamSupport.stream(userIds.spliterator(), false)
-                        .map(JsonNode::asText)
-                        .filter(s -> !s.isBlank())
-                        .collect(Collectors.toUnmodifiableSet());
-            }
-            return Collections.emptySet();
+            return com.flag.common.util.RuleConfigParser.parseWhitelist(root);
         }
     }
 }

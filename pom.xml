@@ -29,6 +29,7 @@
         <module>flag-sdk-api</module>
         <module>flag-sdk-light-client</module>
         <module>flag-sdk-heavy-client</module>
+        <module>flag-engine</module>
     </modules>
 
     <properties>
@@ -65,6 +66,11 @@
             <dependency>
                 <groupId>com.flag</groupId>
                 <artifactId>flag-sdk-heavy-client</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.flag</groupId>
+                <artifactId>flag-engine</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

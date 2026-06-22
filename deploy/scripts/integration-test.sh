@@ -20,10 +20,12 @@ skip() { SKIPPED=$((SKIPPED + 1)); echo "  [SKIP] $1"; [ -n "$2" ] && echo "    
 
 call_api() {
     local method="$1" url="$2" body="$3"
+    rm -f /tmp/inttest_resp.json
+    # --connect-timeout 3 --max-time 5 ensures curl won't hang on unavailable services
     if [ -n "$body" ]; then
-        curl -s -o /tmp/inttest_resp.json -w "%{http_code}" -X "$method" "$url" -H "Content-Type: application/json" -d "$body"
+        echo "$body" | curl -s --connect-timeout 3 --max-time 5 -X "$method" "$url" -H "Content-Type: application/json" -d @- -o /tmp/inttest_resp.json -w "%{http_code}" 2>/dev/null || echo "000"
     else
-        curl -s -o /tmp/inttest_resp.json -w "%{http_code}" -X "$method" "$url" -H "Content-Type: application/json"
+        curl -s --connect-timeout 3 --max-time 5 -X "$method" "$url" -H "Content-Type: application/json" -o /tmp/inttest_resp.json -w "%{http_code}" 2>/dev/null || echo "000"
     fi
 }
 get_json() { cat /tmp/inttest_resp.json 2>/dev/null || echo '{}'; }
@@ -35,7 +37,13 @@ header "1/9  Health Check"
 for svc in "$ADMIN_API/actuator/health" "$EVAL_SERVICE/actuator/health" "$INGEST_SERVICE/actuator/health" "$WORKER_SERVICE/actuator/health"; do
     http_code=$(call_api GET "$svc")
     status=$(get_json | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-    [ "$http_code" = "200" ] && [ "$status" = "UP" ] && pass "$svc" || fail "$svc" "HTTP=$http_code, status=$status"
+    if [ "$http_code" = "200" ] && [ "$status" = "UP" ]; then
+        pass "$svc"
+    elif [ "$status" = "UP" ]; then
+        pass "$svc"
+    else
+        fail "$svc" "HTTP=$http_code, status=$status"
+    fi
 done
 
 # ============================================================

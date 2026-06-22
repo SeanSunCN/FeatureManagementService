@@ -29,6 +29,12 @@
             </exclusions>
         </dependency>
 
+        <!-- Pure rule engine — shared with Heavy SDK -->
+        <dependency>
+            <groupId>com.flag</groupId>
+            <artifactId>flag-engine</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
