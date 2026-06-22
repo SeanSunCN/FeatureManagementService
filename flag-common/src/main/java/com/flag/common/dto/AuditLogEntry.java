@@ -13,7 +13,8 @@ import java.util.Map;
  * SDK calls /evaluate, then EvalService or the SDK reports the evaluation
  * to IngestService. AuditLogChannel writes to Kafka, eventually landed in ClickHouse.
  *
- * Note: recorded_at is generated server-side; clients must NOT include a timestamp.
+ * timestamp field is populated by IngestService on arrival (server-side clock),
+ * ensuring accuracy regardless of Kafka consumer lag.
  */
 @Data
 @NoArgsConstructor
@@ -26,9 +27,9 @@ public class AuditLogEntry {
     /** Matched rule label (e.g. "rule-matched", "global-disabled", "cache-hit", "whitelist", "targeting:region") */
     private String matchedRule;
     private String clientIp;
-    /** Snapshot of context attributes passed during evaluation (e.g. {"client_version":"1.2.4", "region":"hz"}) */
+    /** Snapshot of context attributes passed during evaluation */
     private Map<String, String> attributesSnapshot;
-    /** Evaluation duration in NANOSECONDS — ms would always be 0 at high concurrency */
+    /** Evaluation duration in NANOSECONDS */
     private long evalCostNs;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();

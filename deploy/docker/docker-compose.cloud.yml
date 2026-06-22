@@ -121,6 +121,7 @@ services:
     volumes:
       - clickhousedata:/var/lib/clickhouse
       - ../scripts/clickhouse-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # ClickHouse user = dev, password = dev123; tables in database = 'flag'
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8123/ping || exit 1"]
       interval: 5s

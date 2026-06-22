@@ -1,13 +1,15 @@
 package com.flag.ingest.channel;
 
 import com.flag.common.dto.AuditLogEntry;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -30,6 +32,8 @@ public class AuditLogChannel {
     private static final String TOPIC = "flag-audit-log";
     private static final long TIMEOUT_MS = 200;
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final KafkaTemplate<String, String> kafkaTemplate;
 
     /**
@@ -43,12 +47,19 @@ public class AuditLogChannel {
 
     /**
      * Asynchronously write audit logs to Kafka.
-     * With timeout; after timeout, degraded drop and accumulate the drop count.
+     * Server-side receive timestamp is injected at the JSON level,
+     * NOT in the DTO (which comes from the SDK).
+     * The ClickHouse MV parses JSONExtractUInt(message, 'timestamp').
      */
     @Async("auditLogExecutor")
     public CompletableFuture<Boolean> ingest(AuditLogEntry entry) {
         try {
-            String json = entry.toJson();
+            // Convert DTO to Map, inject timestamp at serialization layer
+            Map<String, Object> message = MAPPER.convertValue(entry, MAPPER.getTypeFactory()
+                    .constructMapType(HashMap.class, String.class, Object.class));
+            message.put("timestamp", System.currentTimeMillis());
+
+            String json = MAPPER.writeValueAsString(message);
             CompletableFuture<Boolean> future = kafkaTemplate.send(TOPIC, entry.getAppId(), json)
                     .thenApply(result -> true)
                     .exceptionally(e -> {
