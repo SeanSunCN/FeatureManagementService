@@ -3,7 +3,9 @@ package com.flag.eval.listener;
 import com.flag.common.constant.RedisChannels;
 import com.flag.common.dto.FlagChangeMessage;
 import com.flag.common.dto.FlagChangeMessage.ChangeType;
+import com.flag.common.model.FlagConfig;
 import com.flag.eval.cache.FlagCache;
+import com.flag.eval.rule.RuleCompiler;
 import com.flag.eval.sse.SseController;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -18,11 +20,15 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * Redis Pub/Sub change notification listener.
  *
- * Architecture diagram: EvalService listens for Redis change notifications -> refreshes local memory cache -> SSE push
+ * Architecture diagram: EvalService listens for Redis change notifications
+ *                      -> refreshes local memory cache
+ *                      -> triggers CDN rule compilation
+ *                      -> SSE push to connected clients
  *
  * Listens on three channels:
  * - flag:change — flag changes (create/delete/update/enable/disable)
@@ -39,6 +45,7 @@ public class FlagChangeListener {
     private final FlagDbLoader flagDbLoader;
     private final SseController sseController;
     private final ObjectMapper objectMapper;
+    private final RuleCompiler ruleCompiler;
 
     private ReactiveRedisMessageListenerContainer container;
     private Disposable subscription;
@@ -47,12 +54,14 @@ public class FlagChangeListener {
                               FlagCache flagCache,
                               FlagDbLoader flagDbLoader,
                               SseController sseController,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper,
+                              RuleCompiler ruleCompiler) {
         this.connectionFactory = connectionFactory;
         this.flagCache = flagCache;
         this.flagDbLoader = flagDbLoader;
         this.sseController = sseController;
         this.objectMapper = objectMapper;
+        this.ruleCompiler = ruleCompiler;
     }
 
     @PostConstruct
@@ -141,6 +150,9 @@ public class FlagChangeListener {
             // Push to connected clients of the corresponding App via SSE
             sseController.pushChange(appId, message);
 
+            // Trigger CDN rule compilation to publish updated safe_for_client flags
+            triggerCdnCompilation(appId);
+
         } catch (Exception e) {
             log.error("Error handling change message: appId={}, type={}", appId, changeType, e);
         }
@@ -149,5 +161,31 @@ public class FlagChangeListener {
     private void reloadApp(String appId) {
         flagCache.putAll(appId, flagDbLoader.loadAllFlags(appId));
         log.info("Cache reloaded for appId={}", appId);
+    }
+
+    /**
+     * Trigger CDN rule compilation for the given app.
+     * Loads all flags from cache and delegates to {@link RuleCompiler#onRuleChanged}.
+     */
+    private void triggerCdnCompilation(String appId) {
+        try {
+            Map<String, FlagConfig> allFlags = new java.util.concurrent.ConcurrentHashMap<>();
+            Map<String, FlagCache.FlagEntry> entries = flagCache.getSnapshot(appId);
+            if (entries.isEmpty()) {
+                log.debug("No flags in cache for appId={}, skipping CDN compilation", appId);
+                return;
+            }
+            for (Map.Entry<String, FlagCache.FlagEntry> e : entries.entrySet()) {
+                FlagConfig config = flagCache.getFlagConfig(appId, e.getKey());
+                if (config != null) {
+                    allFlags.put(e.getKey(), config);
+                }
+            }
+            if (!allFlags.isEmpty()) {
+                ruleCompiler.onRuleChanged(allFlags);
+            }
+        } catch (Exception e) {
+            log.error("Failed to trigger CDN compilation for appId={}: {}", appId, e.getMessage());
+        }
     }
 }

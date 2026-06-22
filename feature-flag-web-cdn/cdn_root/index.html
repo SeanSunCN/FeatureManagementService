@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Flag CDN Demo — Full Chain Verification</title>
+
+    <!-- Load the Web SDK -->
+    <script src="/feature-flag-web-sdk.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.4s ease, color 0.4s ease;
+        }
+
+        .container {
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 48px;
+            max-width: 640px;
+            width: 90%;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.4);
+            text-align: center;
+            transition: background 0.4s ease;
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            margin-bottom: 32px;
+            font-size: 14px;
+        }
+
+        .status-box {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 28px;
+        }
+
+        .status-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.old-ui {
+            background: #64748b;
+        }
+
+        .status-dot.new-ui {
+            background: #22c55e;
+            box-shadow: 0 0 12px rgba(34,197,94,0.5);
+        }
+
+        .btn {
+            padding: 14px 40px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: #fff;
+        }
+
+        .btn-secondary {
+            background: #334155;
+            color: #94a3b8;
+        }
+
+        .btn-secondary:hover {
+            background: #475569;
+            color: #e2e8f0;
+        }
+
+        .diagnostics {
+            margin-top: 32px;
+            padding: 16px;
+            background: #0f172a;
+            border-radius: 10px;
+            text-align: left;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .diagnostics dt {
+            color: #94a3b8;
+            float: left;
+            clear: left;
+            width: 140px;
+        }
+
+        .diagnostics dd {
+            color: #22c55e;
+            margin-left: 140px;
+        }
+
+        .diagnostics dd.cache-hit {
+            color: #22c55e;
+        }
+
+        .diagnostics dd.cache-miss {
+            color: #f59e0b;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .footer {
+            margin-top: 28px;
+            font-size: 12px;
+            color: #475569;
+        }
+
+        /* ============================================================ */
+        /*  New UI theme (applied when new-ui-portal is enabled)         */
+        /* ============================================================ */
+
+        body.new-ui {
+            background: linear-gradient(135deg, #0f172a 0%, #1a1a2e 50%, #16213e 100%);
+        }
+
+        body.new-ui .container {
+            background: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            box-shadow: 0 25px 60px rgba(59, 130, 246, 0.15);
+        }
+
+        body.new-ui h1 {
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        body.new-ui .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+        }
+
+        body.new-ui .subtitle {
+            color: #818cf8;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Feature Flag CDN Demo</h1>
+        <p class="subtitle" id="subtitle">Initialising SDK...</p>
+
+        <div class="status-box">
+            <span class="status-dot old-ui" id="statusDot"></span>
+            <span id="statusLabel">Checking flag...</span>
+        </div>
+
+        <button class="btn btn-primary" id="checkBtn" disabled>
+            🔄 Check "new-ui-portal"
+        </button>
+
+        <button class="btn btn-secondary" id="refreshBtn" style="margin-left: 8px;">
+            ↻ Re-init SDK
+        </button>
+
+        <div class="diagnostics" id="diagnostics">
+            <dl>
+                <dt>SDK State:</dt><dd id="ddState">—</dd>
+                <dt>Flag Count:</dt><dd id="ddFlagCount">—</dd>
+                <dt>Manifest Version:</dt><dd id="ddVersion">—</dd>
+                <dt>Rules Cache:</dt><dd id="ddCache">—</dd>
+                <dt>Transfer Size:</dt><dd id="ddTransfer">—</dd>
+                <dt>Fetch Duration:</dt><dd id="ddDuration">—</dd>
+                <dt>CDN Base:</dt><dd id="ddCdn">—</dd>
+            </dl>
+        </div>
+
+        <div class="footer">
+            CDN: <span id="cdnUrlDisplay">http://localhost:8080</span>
+            &nbsp;|&nbsp;
+            <a href="javascript:void(0)" id="forceRefresh" style="color: #64748b;">Force re-fetch</a>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            const CDN_BASE = 'http://localhost:8080';
+
+            // ================================================================
+            //  DOM references
+            // ================================================================
+
+            const subtitleEl    = document.getElementById('subtitle');
+            const statusDot     = document.getElementById('statusDot');
+            const statusLabel   = document.getElementById('statusLabel');
+            const checkBtn      = document.getElementById('checkBtn');
+            const refreshBtn    = document.getElementById('refreshBtn');
+            const cdnUrlDisplay = document.getElementById('cdnUrlDisplay');
+
+            const ddState      = document.getElementById('ddState');
+            const ddFlagCount  = document.getElementById('ddFlagCount');
+            const ddVersion    = document.getElementById('ddVersion');
+            const ddCache      = document.getElementById('ddCache');
+            const ddTransfer   = document.getElementById('ddTransfer');
+            const ddDuration   = document.getElementById('ddDuration');
+            const ddCdn        = document.getElementById('ddCdn');
+
+            // ================================================================
+            //  Core: init SDK and update UI
+            // ================================================================
+
+            async function initAndRender() {
+                // Disable button during init
+                checkBtn.disabled = true;
+                subtitleEl.textContent = '⏳ Loading rules from CDN...';
+
+                try {
+                    // Clear Resource Timing buffer so we get fresh entries
+                    if (window.performance && performance.clearResourceTimings) {
+                        performance.clearResourceTimings();
+                    }
+
+                    await FeatureFlagSDK.initSdk(CDN_BASE);
+
+                    subtitleEl.textContent = '✓ SDK initialised. Click the button to evaluate.';
+                    checkBtn.disabled = false;
+
+                    // Evaluate once automatically to show initial state
+                    evaluateAndRender();
+
+                } catch (err) {
+                    subtitleEl.textContent = '✗ Failed to initialise SDK: ' + err.message;
+                    console.error('[Demo] init failed:', err);
+                }
+
+                // Always render diagnostics, even on failure
+                renderDiagnostics();
+            }
+
+            // ================================================================
+            //  Evaluate and update theme
+            // ================================================================
+
+            function evaluateAndRender() {
+                const result = FeatureFlagSDK.isEnabled('new-ui-portal', {
+                    userId: 'demo-user',
+                    attributes: { region: 'us-east' }
+                });
+
+                const dot = document.getElementById('statusDot');
+                const label = document.getElementById('statusLabel');
+
+                if (result) {
+                    document.body.classList.add('new-ui');
+                    dot.className = 'status-dot new-ui';
+                    label.textContent = '✨ New UI is ACTIVE';
+                    console.log('[Demo] new-ui-portal = TRUE — new theme applied');
+                } else {
+                    document.body.classList.remove('new-ui');
+                    dot.className = 'status-dot old-ui';
+                    label.textContent = '◼ Old UI is active';
+                    console.log('[Demo] new-ui-portal = FALSE — old theme active');
+                }
+
+                renderDiagnostics();
+            }
+
+            // ================================================================
+            //  Diagnostics panel
+            // ================================================================
+
+            function renderDiagnostics() {
+                let diag;
+                try {
+                    diag = FeatureFlagSDK.getDiagnostics();
+                } catch (e) {
+                    diag = null;
+                }
+
+                if (!diag) {
+                    ddState.textContent = 'NOT INITIALISED';
+                    return;
+                }
+
+                ddState.textContent     = diag.flagCount > 0 ? 'READY' : 'EMPTY';
+                ddFlagCount.textContent = String(diag.flagCount);
+                ddVersion.textContent   = String(diag.version);
+                ddCache.textContent     = diag.fromCache ? '✅ DISK CACHE' : '⚠ NETWORK FETCH';
+                ddCache.className       = diag.fromCache ? 'cache-hit' : 'cache-miss';
+                ddTransfer.textContent  = diag.transferSize === -1 ? 'N/A' : diag.transferSize + ' B';
+                ddDuration.textContent  = diag.duration + ' ms';
+                ddCdn.textContent       = CDN_BASE;
+            }
+
+            // ================================================================
+            //  Event listeners
+            // ================================================================
+
+            checkBtn.addEventListener('click', evaluateAndRender);
+
+            refreshBtn.addEventListener('click', function () {
+                initAndRender();
+            });
+
+            document.getElementById('forceRefresh').addEventListener('click', function () {
+                // Append timestamp to simulate a full cache bust
+                console.log('[Demo] Force re-fetch triggered — appending ?t=' + Date.now());
+                initAndRender();
+            });
+
+            cdnUrlDisplay.textContent = CDN_BASE;
+
+            // ================================================================
+            //  GO!
+            // ================================================================
+
+            initAndRender();
+
+            // Also evaluate on every page focus (in case user switched back)
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden && !checkBtn.disabled) {
+                    evaluateAndRender();
+                }
+            });
+
+        })();
+    </script>
+
+</body>
+</html>
