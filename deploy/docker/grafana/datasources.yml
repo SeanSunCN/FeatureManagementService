@@ -1,0 +1,40 @@
+# ============================================================
+# Feature Management Service — Grafana Data Sources (Provisioning)
+# ============================================================
+# Auto-registered on Grafana startup via volume mount.
+# Path inside container: /etc/grafana/provisioning/datasources/datasources.yml
+# ============================================================
+
+apiVersion: 1
+
+datasources:
+
+  # ---- Data Source 1: Prometheus (default, time-series) ----
+  # Purpose: system-level observability — RPS, latency percentiles, JVM metrics,
+  #          cache hit rates, Kafka consumer lag, etc.
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  # ---- Data Source 2: ClickHouse (OLAP, analytical SQL) ----
+  # Purpose: explainability / deep-dive analytics — trace individual user evaluation
+  #          results, flag-to-user attribution, behavioral patterns over time.
+  # Plugin: grafana-clickhouse-datasource (auto-installed via GF_INSTALL_PLUGINS)
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    url: http://flag-clickhouse:8123
+    isDefault: false
+    editable: false
+    jsonData:
+      defaultDatabase: dev
+      port: 8123
+      username: dev
+      tlsAuth: false
+      server: flag-clickhouse
+      protocol: http
+    secureJsonData:
+      password: dev123

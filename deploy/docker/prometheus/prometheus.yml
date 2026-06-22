@@ -1,0 +1,52 @@
+# ============================================================
+# Feature Management Service — Prometheus Configuration
+# ============================================================
+# Scrapes all 4 microservices via the internal Docker network (flag_net)
+# Metrics endpoint: /actuator/prometheus (Spring Boot Actuator + Micrometer)
+# ============================================================
+
+global:
+  scrape_interval:     5s      # High-frequency scrape for low-latency evaluation metrics
+  evaluation_interval: 15s
+
+scrape_configs:
+
+  # ---- flag-admin-api (Admin API) ----
+  - job_name: 'flag-admin-api'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - 'flag-admin-api:8080'
+        labels:
+          service: flag-admin-api
+          layer: control-plane
+
+  # ---- flag-eval-service (Evaluation Engine) ----
+  - job_name: 'flag-eval-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - 'flag-eval-service:8081'
+        labels:
+          service: flag-eval-service
+          layer: data-plane
+
+  # ---- flag-ingest-service (Ingestion Gateway) ----
+  - job_name: 'flag-ingest-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - 'flag-ingest-service:8082'
+        labels:
+          service: flag-ingest-service
+          layer: data-plane
+
+  # ---- flag-metrics-worker (Async Metrics Worker) ----
+  - job_name: 'flag-metrics-worker'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets:
+          - 'flag-metrics-worker:8083'
+        labels:
+          service: flag-metrics-worker
+          layer: data-plane
