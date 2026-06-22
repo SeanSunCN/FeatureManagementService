@@ -123,6 +123,9 @@ public class FlagChangeListener {
                     if (flagKey != null) {
                         flagCache.remove(appId, flagKey);
                         log.debug("Cache removed for appId={}, flagKey={}", appId, flagKey);
+                    } else {
+                        flagCache.removeAll(appId);
+                        log.info("Cache cleared for deleted appId={}", appId);
                     }
                     break;
 

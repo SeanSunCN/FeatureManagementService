@@ -91,7 +91,9 @@
       "Bash(grep *)",
       "Bash(curl *)",
       "Bash(/c/Users/Sean/AppData/Local/Microsoft/WindowsApps/python3 --version)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('flags:', len\\(d.get\\('data',[]\\)\\)\\)\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('flags:', len\\(d.get\\('data',[]\\)\\)\\)\")",
+      "Bash(choco install *)",
+      "Bash(PATH=__TRACKED_VAR__:/c/Users/Sean/AppData/Local/Programs bash deploy/scripts/e2e-test.sh)"
     ]
   }
 }

@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: flag-eval-service
+  # WebFlux / Reactor Netty 容器配置
+  # Netty 是纯异步事件驱动，无 Servlet API。长连接（SSE）由 Netty EventLoop 管理，
+  # **不存在** Tomcat 的 async-request-timeout（默认 30s 断连）风险。
+  # Reactor Netty 调优（可选，默认值已满足高并发场景）：
+  # reactor.netty.ioWorkerCount 默认 = CPU 核数 × 2
   datasource:
     url: jdbc:postgresql://${DB_HOST:192.168.5.66}:${DB_PORT:15432}/flag_db
     username: ${DB_USERNAME:postgres}

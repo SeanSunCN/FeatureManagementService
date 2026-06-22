@@ -129,6 +129,12 @@ public class FeatureFlagService {
     //  Legacy mutations  (still accept raw Entity, kept for backward compat)
     // ========================================================================
 
+    /**
+     * @deprecated Use {@link #createFromDto(String, CreateFlagRequest)} instead.
+     * This method accepts a raw Entity, exposing audit fields (id, createdAt, updatedAt)
+     * and the unique-index flagKey to mass-assignment.
+     */
+    @Deprecated(since = "2026-06-22", forRemoval = true)
     @Transactional
     public FeatureFlagEntity create(FeatureFlagEntity flag) {
         appService.getByAppId(flag.getAppId());
@@ -143,6 +149,12 @@ public class FeatureFlagService {
         return saved;
     }
 
+    /**
+     * @deprecated Use {@link #updateFromDto(String, String, FlagUpdateRequest)} instead.
+     * This method accepts a raw Entity, exposing audit fields and the unique-index
+     * flagKey to mass-assignment via HTTP body.
+     */
+    @Deprecated(since = "2026-06-22", forRemoval = true)
     @Transactional
     public FeatureFlagEntity update(String appId, String flagKey, FeatureFlagEntity update) {
         FeatureFlagEntity existing = getByAppIdAndFlagKey(appId, flagKey);

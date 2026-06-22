@@ -18,6 +18,15 @@
         <dependency>
             <groupId>com.flag</groupId>
             <artifactId>flag-common</artifactId>
+            <!-- 排除隐式拉入的 spring-boot-starter-web（Tomcat / spring-webmvc），
+                 确保 eval-service 的类路径纯净，WebFlux 不被 Servlet 容器污染。
+                 flag-common 自身的编译不受影响。 -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-web</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
