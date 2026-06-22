@@ -1,74 +1,158 @@
 # Feature Management Service
 
+Cloud-native feature flag management system with control/data plane separation, CDN distribution, and dual-channel metrics/audit ingestion.
+
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Client Layer (SDK)                                          │
-│  Heavy SDK (Backend Microservices · SSE Long Connection ·   │
-│            Local Cache Evaluation)                          │
-│  Light SDK (Mobile/Web · HTTP Blind Query · In-Memory       │
-│            Counting & Batching)                             │
-└──────────────────────┬──────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ Client Layer (SDK)                                                    │
+│  Heavy SDK (Backend Microservices · SSE Long Connection ·            │
+│            Local Cache Evaluation)                                    │
+│  Light SDK (Mobile/Web · HTTP Blind Query · In-Memory                │
+│            Counting & Batching)                                       │
+└──────────────────────┬───────────────────────────────────────────────┘
                        │
-┌──────────────────────▼──────────────────────────────────────┐
-│ Edge & Gateway Layer                                        │
-│  K8s Ingress / NodePort · CDN Cache · Unified Push Center   │
-└────────────────────────────────────────────────┬────────────┘
-                                                 │
-┌─────────────────┐                 ┌────────────▼──────────┐
-│ Control Plane   │                 │ Data Plane            │
-│ (Admin)         │                 │ (EvalService)         │
-│ Admin API       │◄────Redis──────►│ Pure In-Memory        │
-│ PostgreSQL      │   Pub/Sub       │ Evaluation Engine     │
-└─────────────────┘                 │ SSE Long Connection   │
-                                    │ Push                  │
-                                    └─────────────┬─────────┘
-                                                  │
-┌─────────────────────────────────────────────────▼────────────┐
-│ IngestService (Data Ingestion)                               │
-│  Pool A: Fire & Forget → Redis High-Frequency Counter        │
-│  Pool B: Timeout Degradation → Kafka Audit Log               │
-└──────────────┬──────────────────────────────────┬────────────┘
-               │                                  │
-┌──────────────▼──────────┐         ┌─────────────▼──────────┐
-│  MetricsWorker          │         │  Kafka → ClickHouse    │
-│  Redis Periodic Flush   │         │  Audit Log Table       │
-│  Hit Metrics Table      │         │                        │
-└─────────────────────────┘         └────────────────────────┘
+┌──────────────────────▼───────────────────────────────────────────────┐
+│ CDN Cache Layer (Nginx)                                              │
+│  Serves rules.<ver>.json via HTTP (Cache Busting via manifest.json)  │
+│  Port 8084 · Static file server · Long-lived cache headers           │
+└──────────────────────────────────────────────────────────────────────┘
+                       │
+┌─────────────────┐                 ┌──────────────────────────────────┐
+│ Control Plane   │                 │ Data Plane                       │
+│ (Admin API)     │                 │ (EvalService)                    │
+│                 │                 │                                  │
+│ CRUD Flags/Apps │◄────Redis──────►│ Pure In-Memory Evaluation        │
+│ PostgreSQL      │   Pub/Sub       │ SSE Long Connection Push         │
+│ CdnSnapshotSvc  │                 │ Rule Engine                      │
+│ (write CDN)     │                 │                                  │
+└─────────────────┘                 └──────────────┬───────────────────┘
+                                                    │
+┌───────────────────────────────────────────────────▼──────────────────┐
+│ IngestService (Data Ingestion)                                       │
+│  Pool A: Fire & Forget → Redis High-Frequency Counter                │
+│  Pool B: Timeout Degradation → Kafka Audit Log                       │
+└──────────────┬────────────────────────────────────┬──────────────────┘
+               │                                    │
+┌──────────────▼──────────┐         ┌───────────────▼────────────────┐
+│  MetricsWorker           │         │  Kafka → ClickHouse            │
+│  Redis Periodic Flush    │         │  Audit Log Table               │
+│  Hit Metrics Table       │         │                                 │
+└─────────────────────────┘         └─────────────────────────────────┘
 ```
 
 ## Project Structure
 
 ```
 feature-management-service/
-├── pom.xml                              # Maven Parent POM
-├── flag-common/                         # Shared DTOs, Unified Responses, Exceptions, Constants
+├── pom.xml                              # Maven Parent POM (multi-module)
+├── .gitignore
 │
-├── flag-sdk-api/                        # [Pure Interface Layer] FlagClient Interface + DTOs
+├── flag-common/                         # [Shared Library]
+│   ├── dto/                             # FlagChangeMessage, EvaluateRequest/Response
+│   ├── enums/                           # FlagStatus, TargetMatchType
+│   ├── exception/                       # BusinessException, ErrorCode, GlobalExceptionHandler
+│   ├── model/                           # FlagConfig, EvaluationRule, Condition
+│   ├── response/                        # UnifiedResponse, PageResult
+│   └── util/                            # RuleConfigParser, RuleConfigValidator
+│
+├── flag-sdk-api/                        # [Pure Interface] FlagClient Interface + DTOs
 │                                        #   2.5 KB · Zero External Dependencies
-├── flag-sdk-light-client/               # [Lightweight Implementation] Java 11+ HttpClient
-│   └── LightFlagClient.java             #   8.5 KB · Daemon Thread Batching · No Third-Party Libs
-├── flag-sdk-heavy-client/               # [Heavy Implementation] SSE + Local Cache + WebFlux
-│   └── HeavyFlagClient.java             #   18 KB · WebClient · Read/Write Lock
+├── flag-sdk-light-client/               # [Lightweight] Java 11+ HttpClient
+│   └── LightFlagClient.java            #   8.5 KB · Daemon Thread Batching · No Third-Party Libs
+├── flag-sdk-heavy-client/               # [Heavy] SSE + Local Cache + WebFlux
+│   ├── HeavyFlagClient.java            #   18 KB · WebClient · Read/Write Lock
+│   ├── RemoteEvaluator / SseStreamMgr  # SSE subscription + local evaluation
+│   └── HeavyMetricsAggregator          # Async metrics batching
 │
-├── flag-admin-api/                      # Control Plane: Application/Rule CRUD + Redis Pub/Sub Notifications
-├── flag-eval-service/                   # Data Plane: Pure In-Memory Evaluation Engine + SSE Push
-├── flag-ingest-service/                 # Data Plane: Dual-Channel Isolated Metrics/Audit Ingestion
-├── flag-metrics-worker/                 # Async Worker: Redis/ClickHouse Persistence
+├── flag-admin-api/                      # [Control Plane]
+│   ├── controller/                      # REST endpoints: App CRUD, Flag CRUD
+│   ├── service/                         # FeatureFlagService, AppService
+│   ├── cdn/                             # <<CDN PUBLISH ENGINE>>
+│   │   ├── CdnSnapshotService.java      # SQL filter → RuleCompiler pipeline
+│   │   ├── RuleCompiler.java            # Atomic file write: rules.<ver>.json + manifest
+│   │   └── ClientFlagMetadata.java      # Client-safe flag DTO
+│   ├── entity/                          # JPA entities (FeatureFlagEntity, AppEntity, FlagOutbox)
+│   ├── repository/                      # Spring Data JPA repositories
+│   ├── publisher/                       # FlagChangePublisher (Redis outbox serialization)
+│   └── config/                          # RedisConfig
+│
+├── flag-eval-service/                   # [Data Plane — Evaluation]
+│   ├── cache/                           # FlagCache (ConcurrentHashMap, per-app snapshots)
+│   ├── engine/                          # EvaluationEngine (rule matching, condition eval)
+│   ├── listener/                        # FlagChangeListener, FlagDbLoader
+│   ├── sse/                             # SseController (SSE long-connection push per app)
+│   └── config/                          # EvalServiceConfig (startup DB load)
+│
+├── flag-ingest-service/                 # [Data Plane — Ingestion]
+│   ├── channel/                         # Dual-channel: MetricsChannel, AuditLogChannel
+│   └── config/                          # ThreadPool configs (isolated pools)
+│
+├── flag-metrics-worker/                 # [Async Worker]
+│   └── service/                         # MetricsFlushService (Redis→ClickHouse batch flush)
+│
+├── flag-engine/                         # [Pure Engine — no Spring dep]
+│   └── RuleEngine.java                  # Stateless rule matching
+│
+├── feature-flag-web-cdn/                # [Web SDK + CDN Static Files]
+│   ├── cdn_root/                        # Versioned rules JSON + manifest (written by admin-api)
+│   │   ├── rules.<ver>.json             # Client-safe flag rules (auto-generated)
+│   │   └── manifest.json               # Latest file pointer (auto-generated)
+│   ├── web-sdk/                         # Browser JS SDK
+│   └── Nginx config                     # Caching headers, manifest caching rules
 │
 └── deploy/
     ├── docker/
-    │   ├── docker-compose.yml            # Microservice Orchestration (connects to existing middleware network)
-    │   ├── Dockerfile.*                  # 4 Microservice Dockerfiles
-    │   └── docker-compose.nas.yml        # NAS Local Deployment Configuration
-    └── k8s/
-        ├── namespace.yaml
-        ├── configmap.yaml               # Infrastructure Connection Config (ExternalName Bridging NAS)
-        ├── infra-bridge.yaml            # Headless Service + Endpoints → NAS Middleware
-        ├── deploy-all.sh                # One-Click Deployment Script
-        ├── *-deployment.yaml            # 4 Microservice Deployments + NodePort Services
-        └── ingress.yaml                 # Ingress-Nginx Configuration (Optional)
+    │   ├── docker-compose.yml            # Full-stack deployment (all services + middleware + CDN)
+    │   ├── Dockerfile.admin-api          # Boot JAR
+    │   ├── Dockerfile.eval-service       # Boot JAR
+    │   ├── Dockerfile.ingest-service     # Boot JAR
+    │   ├── Dockerfile.metrics-worker     # Boot JAR
+    │   ├── nginx.conf                    # CDN Nginx config (cache headers)
+    │   ├── prometheus/                   # Prometheus config
+    │   └── grafana/                      # Grafana datasource + dashboard provisioning
+    ├── scripts/
+    │   ├── integration-test.py           # End-to-end Python integration test
+    │   ├── deploy.sh                     # Server-side deploy script
+    │   ├── health-check.sh               # Quick health check
+    │   ├── env-check.sh                  # Environment prerequisite check
+    │   └── clean-e2e.sh                  # Clean up test data
+    ├── k8s/
+    │   ├── namespace.yaml
+    │   ├── configmap.yaml
+    │   ├── *-deployment.yaml             # 4 Microservice Deployments + NodePort Services
+    │   ├── infra-bridge.yaml             # Headless Service → NAS Middleware
+    │   ├── ingress.yaml
+    │   └── deploy-all.sh                 # One-click K8s deploy
+    └── scripts/
+        └── postgres-init.sql            # PostgreSQL schema init
+```
+
+## CDN Rule Distribution Pipeline
+
+```
+Flag mutation (create/update/delete)
+       │
+       ▼
+FeatureFlagService (flag-admin-api)
+       │
+       ├─► Save to PostgreSQL (transactional outbox → Redis Pub/Sub → EvalService refresh)
+       │
+       └─► CdnSnapshotService.publishAllSafeFlags()
+                │
+                ├─1─► SQL: SELECT * FROM flag_feature WHERE safe_for_client = TRUE
+                │        (physical isolation — server-only flags never leave DB)
+                │
+                ├─2─► RuleCompiler.publishSnapshot(clientFlags)
+                │        │
+                │        ├─► Write rules.<ver>.json.tmp
+                │        ├─► Acquire FileLock on manifest.json (OS-level, multi-instance safe)
+                │        ├─► Atomic rename .tmp → rules.<ver>.json
+                │        └─► Overwrite manifest.json with new latest_file pointer
+                │
+                └─3─► CDN Nginx serves rules.<ver>.json via HTTP
+                         (Cache-Control: public, immutable, max-age=31536000)
 ```
 
 ## SDK Three-Module Topology
@@ -81,196 +165,170 @@ feature-management-service/
 
 ### LightFlagClient Design Pillars
 
-1. **Synchronous Evaluation + Fallback** — Java 11+ HttpClient calls EvalService, `try-catch` degrades to default false
-2. **Async In-Memory Accumulation** — `ConcurrentHashMap<String, AtomicLong>` atomic accumulation, zero blocking on main thread
-3. **Daemon Thread Periodic Batching** — `ScheduledExecutorService` (daemon=true), fetches snapshot every 5s via `getAndSet(0)` and reports
-4. **Server-Side Clock to Prevent Partition Explosion** — Report payloads must not carry a timestamp, forcing the server to inject now()
-5. **Graceful Shutdown** — `AutoCloseable.close()` → one final synchronous flush → shutdown
+1. **Synchronous Evaluation + Fallback** — Java 11+ HttpClient calls EvalService, degrades to default false
+2. **Async In-Memory Accumulation** — `ConcurrentHashMap<String, AtomicLong>` zero blocking
+3. **Daemon Thread Periodic Batching** — `ScheduledExecutorService` (daemon=true), 5s interval
+4. **Server-Side Clock** — Report payloads omit timestamps, server injects `now()` to prevent partition explosion
+5. **Graceful Shutdown** — `AutoCloseable.close()` → final synchronous flush → shutdown
 
 ```java
 // Programming to the interface
 FlagSdkClient client = new LightFlagClient("my-app",
     "http://localhost:8081", "http://localhost:8082");
-
 boolean enabled = client.isEnabled("my-app", "new-feature", "user-123");
-// Async accumulation → auto-flush to IngestService every 5s
 client.close();   // Graceful shutdown — final flush prevents data loss
 ```
 
-## Prerequisites
-
-### Middleware (Synology NAS 192.168.5.66 — accessed via K8s Headless Service / Docker infra_net)
-
-| Service     | Internal Domain              | Port  | Purpose                |
-|-------------|------------------------------|-------|------------------------|
-| PostgreSQL  | dev-postgres.flag-system.svc | 15432 | Rule metadata storage  |
-| Redis       | dev-redis.flag-system.svc    | 6379  | Pub/Sub + Metric counting |
-| Kafka       | dev-kafka.flag-system.svc    | 9092  | Audit log buffering    |
-| ClickHouse  | dev-clickhouse.flag-system.svc | 8123 | Metrics/audit analytics storage |
-
-### Build Environment
-
-- JDK 21+
-- Maven 3.9+
-- Docker Desktop (local development)
-- kind + kubectl (local K8s)
-
 ## Quick Start
+
+### Prerequisites
+
+| Service     | Docker Compose | Purpose                |
+|-------------|----------------|------------------------|
+| PostgreSQL  | Built-in       | Rule metadata storage  |
+| Redis       | Built-in       | Pub/Sub + Metric counting |
+| Kafka       | Built-in       | Audit log buffering    |
+| ClickHouse  | Built-in       | Metrics/audit analytics |
+
+**Build Environment:** JDK 21+, Maven 3.9+, Docker Desktop
 
 ### 1. Build All Modules
 
 ```bash
-mvn clean package -DskipTests
+mvn clean package -DskipTests -Dmaven.test.skip=true
 ```
 
-### 2. Local Docker Compose (Docker Desktop)
+### 2. Full-Stack Docker Deploy
 
 ```bash
 cd deploy/docker
-docker compose -f docker-compose.yml -f docker-compose.nas-override.yml up -d
+docker compose -f docker-compose.yml up -d --build
 ```
 
-### 3. Local Kind K8s One-Click Deployment
+This starts all 9 containers: PostgreSQL, Redis, Kafka, ClickHouse, CDN Nginx,
+Prometheus, Grafana, and all 4 microservices.
+
+### 3. Integration Test
 
 ```bash
-# Prerequisite: kind cluster created, images loaded
-bash deploy/k8s/deploy-all.sh
+python3 deploy/scripts/integration-test.py
+# Custom ports:
+python3 deploy/scripts/integration-test.py --admin http://admin:8080 --wait 5
+```
 
-# Access (NodePort → localhost)
-curl http://localhost:8080/actuator/health   # AdminAPI
+### 4. Manual Verification
+
+```bash
+curl http://localhost:8080/actuator/health   # Admin API
 curl http://localhost:8081/actuator/health   # EvalService
 curl http://localhost:8082/actuator/health   # IngestService
 curl http://localhost:8083/actuator/health   # MetricsWorker
-```
-
-### 4. NAS Local Docker Deployment (SSH + docker run)
-
-```bash
-# Transfer images to NAS via docker save/load
-ssh nas 'docker run -d --network infra_net ... docker-flag-admin-api:latest'
-# See deploy/scripts/ for details
-```
-
-### 5. End-to-End Verification
-
-```bash
-# PowerShell integration test script
-.\deploy\scripts\integration-test.ps1
-
-# Or manual curl verification (see ENDPOINT_GUIDE.md)
+curl http://localhost:8084/__headers         # CDN Nginx
+curl http://localhost:8084/manifest.json     # CDN rules manifest
 ```
 
 ## API Reference
 
 ### Control Plane — Admin API (Port 8080)
 
-| Method | Path                                          | Description                      |
-|--------|-----------------------------------------------|----------------------------------|
-| GET    | /api/v1/apps                                  | List all applications            |
-| POST   | /api/v1/apps                                  | Create an application            |
-| GET    | /api/v1/apps/{appId}                          | Get a single application         |
-| PUT    | /api/v1/apps/{appId}                          | Update an application            |
-| DELETE | /api/v1/apps/{appId}                          | Delete an application (cascading flag delete) |
-| GET    | /api/v1/apps/{appId}/flags                    | List all flags for an application |
-| POST   | /api/v1/apps/{appId}/flags                    | Create a feature flag            |
-| GET    | /api/v1/apps/{appId}/flags/{flagKey}           | Get a single feature flag        |
-| PUT    | /api/v1/apps/{appId}/flags/{flagKey}           | Update a feature flag            |
-| DELETE | /api/v1/apps/{appId}/flags/{flagKey}           | Delete a feature flag            |
-| PATCH  | /api/v1/apps/{appId}/flags/{flagKey}/enabled   | Enable/disable a flag (Body: `{"enabled":false}`) |
-| POST   | /api/v1/apps/{appId}/flags/reload              | Trigger full refresh push        |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/v1/apps | List all applications |
+| POST | /api/v1/apps | Create an application |
+| GET | /api/v1/apps/{appId} | Get a single application |
+| PUT | /api/v1/apps/{appId} | Update an application |
+| DELETE | /api/v1/apps/{appId} | Delete an application (cascading flag delete) |
+| GET | /api/v1/apps/{appId}/flags | List all flags for an application |
+| POST | /api/v1/apps/{appId}/flags | Create a feature flag |
+| GET | /api/v1/apps/{appId}/flags/{flagKey} | Get a single feature flag |
+| PUT | /api/v1/apps/{appId}/flags/{flagKey} | Update a feature flag |
+| DELETE | /api/v1/apps/{appId}/flags/{flagKey} | Delete a feature flag |
+| PATCH | /api/v1/apps/{appId}/flags/{flagKey}/enabled | Enable/disable a flag |
+| POST | /api/v1/apps/{appId}/flags/reload | Trigger full refresh push |
 
 ### Data Plane — EvalService (Port 8081)
 
-| Method | Path                                         | Description                       |
-|--------|----------------------------------------------|-----------------------------------|
-| POST   | /api/v1/eval/evaluate                        | Evaluate a single feature flag    |
-| POST   | /api/v1/eval/evaluate/batch?appId=xxx        | Batch evaluation                  |
-| GET    | /api/v1/eval/flags?appId=xxx                 | Get full rule snapshot (CDN origin) |
-| GET    | /api/v1/eval/sse/subscribe?appId=xxx         | SSE long connection subscribe for change pushes |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /api/v1/eval/evaluate | Evaluate a single feature flag |
+| POST | /api/v1/eval/evaluate/batch | Batch evaluation |
+| GET | /api/v1/eval/flags?appId=xxx | Get full rule snapshot |
+| GET | /api/v1/eval/sse/subscribe?appId=xxx | SSE long connection for change pushes |
 
 ### Data Ingestion — IngestService (Port 8082)
 
-| Method | Path                           | Description                          |
-|--------|---------------------------------|--------------------------------------|
-| POST   | /api/v1/ingest/metrics          | Report evaluation metrics (Fire & Forget) |
-| POST   | /api/v1/ingest/audit-log        | Report audit log (timeout degradation) |
-| POST   | /api/v1/ingest/audit-log/batch  | Batch report audit logs              |
-| GET    | /api/v1/ingest/drop-total       | Get total count of dropped audit logs |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /api/v1/ingest/metrics | Report evaluation metrics (Fire & Forget) |
+| POST | /api/v1/ingest/audit-log | Report single audit log |
+| POST | /api/v1/ingest/audit-log/batch | Batch report audit logs |
+| GET | /api/v1/ingest/drop-total | Count of dropped audit logs |
+
+### CDN Cache (Port 8084)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /manifest.json | Latest rules file pointer (Cache Busting) |
+| GET | /rules.<ver>.json | Versioned client-safe flag rules (1 year cache) |
+| GET | /feature-flag-web-sdk.js | Web SDK JS (1 hour cache) |
+| GET | /__headers | Debug: echo request headers |
+| GET | / | Static assets (html, images — 5 min cache) |
 
 ## Core Design Principles
 
-### Data Plane / Control Plane Separation
-- Control Plane (Admin API) — high latency, strong consistency, directly operates PostgreSQL
-- Data Plane (EvalService) — pure in-memory, stateless, detects changes via Redis Pub/Sub
-- Runtime evaluation path has zero database calls
+### Control Plane / Data Plane Separation
+- **Admin API** (Control Plane) — direct PostgreSQL, transactional outbox → Redis Pub/Sub
+- **EvalService** (Data Plane) — pure in-memory, zero DB at runtime, detects changes via Redis
+- **CDN Snapshot** — admin-api writes directly to shared volume, Nginx serves statically
+
+### SQL-Level Client Flag Filtering
+- Server-only flags (`safe_for_client = FALSE`) are physically excluded at the query level
+- They never enter the CDN pipeline — security by architecture, not by convention
 
 ### IngestService Dual-Channel Isolation
-- **Pool A (Metrics)**: Fire & Forget, never blocks the caller, `CallerRunsPolicy`
-- **Pool B (Audit Log)**: With timeout degradation (200ms), auto-discard on timeout with counting
-- Two thread pools are fully isolated — blocking on one channel does not affect the other
+- **Pool A (Metrics)**: Fire & Forget, never blocks, `CallerRunsPolicy`
+- **Pool B (Audit Log)**: 200ms timeout degradation, auto-discard with counting
+- Two thread pools fully isolated — blocking one channel does not affect the other
 
-### MetricsWorker Dual-Pipeline Persistence
-- **Audit Log**: Kafka streaming consumption → `KafkaAuditConsumer` → near real-time writes to ClickHouse
-- **Hit Metrics**: Redis high-frequency counter → `MetricsFlushService` `@Scheduled(10s)` → batch writes to ClickHouse
+### Atomic CDN File Publish
+- Write to temp file → OS-level `FileLock` → atomic rename → overwrite manifest
+- Multi-instance safe: concurrent admin nodes lock via `FileChannel.tryLock()`
+- Version counter prevents stale read: manifest points to `rules.<N>.json`
 
 ### SSE Precise Push Per App
-- EvalService maintains independent `Sinks.Many` for each AppId
+- EvalService maintains independent `Sinks.Many` per AppId
 - On rule changes, only pushes changes to connected clients of the corresponding app
-- Keep-alive heartbeat (default 30s)
+- Heartbeat via SSE comment line (protocol-level, no DTO pollution)
 
 ### Server-Side Unified Timestamp
-- All persistence timestamps (`recorded_at`) are forcibly generated server-side
-- DTO layer has removed `timestamp`/`reportTimestamp` fields
-- Clients cannot tamper with timestamps, preventing ClickHouse partition explosion risk
+- All persistence timestamps (`recorded_at`) server-generated
+- DTO layer removes `timestamp`/`reportTimestamp` fields — prevents ClickHouse partition explosion
 
-### K8s Native Service Discovery
-- No Nacos/Consul/Eureka introduced
-- East-west traffic goes through K8s Service (CoreDNS + IPVS)
-- Middleware bridged from NAS via Headless Service + Endpoints
+## Port Map
 
-## ClickHouse Table Schema
+| Port | Service | Container |
+|------|---------|-----------|
+| 8080 | Admin API | flag-admin-api |
+| 8081 | EvalService | flag-eval-service |
+| 8082 | IngestService | flag-ingest-service |
+| 8083 | MetricsWorker | flag-metrics-worker |
+| 8084 | CDN Nginx | flag-cdn |
+| 9090 | Prometheus | flag-prometheus |
+| 3000 | Grafana | flag-grafana (mapped to 33000) |
 
-```sql
--- Hit metrics statistics
-CREATE TABLE IF NOT EXISTS flag.flag_hit_metrics (
-    app_id      String,
-    flag_key    String,
-    hits        UInt64,
-    eval_count  UInt64,
-    recorded_at DateTime
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMM(recorded_at)
-ORDER BY (app_id, flag_key, recorded_at);
+## Environment Variables
 
--- Audit log
-CREATE TABLE IF NOT EXISTS flag.flag_audit_log (
-    app_id       String,
-    flag_key     String,
-    user_id      String,
-    enabled      UInt8,
-    client_ip    String,
-    eval_cost_ms UInt32,
-    recorded_at  DateTime
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMM(recorded_at)
-ORDER BY (app_id, recorded_at, flag_key);
-```
-
-## Environment Variable Reference
-
-| Variable               | Default (K8s)            | Default (Docker)           | Description             | Service(s)              |
-|------------------------|--------------------------|----------------------------|-------------------------|-------------------------|
-| DB_HOST                | dev-postgres.flag-system | 192.168.5.66              | PostgreSQL host          | admin, eval              |
-| DB_PORT                | 5432 (K8s DNS)           | 15432 (NAS mapped)        | PostgreSQL port          | admin, eval              |
-| DB_USERNAME            | postgres                 | postgres                  | Database username        | admin, eval              |
-| DB_PASSWORD            | 666666                   | 666666                    | Database password        | admin, eval              |
-| REDIS_HOST             | dev-redis.flag-system    | 192.168.5.66              | Redis host               | all                      |
-| REDIS_PORT             | 6379                     | 6379                      | Redis port               | all                      |
-| KAFKA_HOST             | dev-kafka.flag-system    | 192.168.5.66              | Kafka host               | ingest, worker           |
-| KAFKA_PORT             | 9092                     | 9092                      | Kafka port               | ingest, worker           |
-| CLICKHOUSE_HOST        | dev-clickhouse.flag-system | 192.168.5.66            | ClickHouse host          | worker                   |
-| CLICKHOUSE_PORT        | 8123                     | 8123                      | ClickHouse port          | worker                   |
-| CLICKHOUSE_USERNAME    | dev                      | dev                       | ClickHouse username      | worker                   |
-| CLICKHOUSE_PASSWORD    | (in ConfigMap)           | (in YAML)                 | ClickHouse password      | worker                   |
-| HOST_IP                | 192.168.5.66             | 192.168.5.66              | External origin address  | all                      |
-| LOG_LEVEL              | INFO                     | INFO                      | Log level                | all                      |
+| Variable | Default | Service(s) |
+|----------|---------|------------|
+| DB_HOST | flag-postgres | admin, eval |
+| DB_PORT | 5432 | admin, eval |
+| DB_PASSWORD | postgres | admin, eval |
+| REDIS_HOST | flag-redis | all |
+| REDIS_PORT | 6379 | all |
+| KAFKA_HOST | flag-kafka | ingest, worker |
+| KAFKA_PORT | 9092 | ingest, worker |
+| CLICKHOUSE_HOST | flag-clickhouse | worker |
+| CLICKHOUSE_PORT | 8123 | worker |
+| CLICKHOUSE_PASSWORD | dev123 | worker |
+| CDN_ROOT | /cdn_root | admin-api |
+| LOG_LEVEL | INFO | all |
