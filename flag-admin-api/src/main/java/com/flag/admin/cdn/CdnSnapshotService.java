@@ -55,7 +55,7 @@ public class CdnSnapshotService {
      * </ol>
      */
     public void publishAllSafeFlags() {
-        List<FeatureFlagEntity> safeFlags = flagRepository.findBySafeForClientTrue();
+        List<FeatureFlagEntity> safeFlags = flagRepository.findBySafeForClientTrueAndEnabledTrue();
 
         if (safeFlags.isEmpty()) {
             log.info("No client-safe flags found, publishing empty CDN snapshot");
@@ -83,7 +83,7 @@ public class CdnSnapshotService {
      * <p>Same as {@link #publishAllSafeFlags()} but scoped to a single app.</p>
      */
     public void publishSafeFlagsForApp(String appId) {
-        List<FeatureFlagEntity> safeFlags = flagRepository.findByAppIdAndSafeForClientTrue(appId);
+        List<FeatureFlagEntity> safeFlags = flagRepository.findByAppIdAndSafeForClientTrueAndEnabledTrue(appId);
 
         if (safeFlags.isEmpty()) {
             log.debug("No client-safe flags found for appId={}, skipping CDN snapshot", appId);

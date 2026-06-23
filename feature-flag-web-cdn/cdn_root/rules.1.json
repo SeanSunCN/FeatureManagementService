@@ -1,47 +1,43 @@
 {
-  "version": 1,
-  "flags": {
-    "new-ui-portal": {
-      "flagKey": "new-ui-portal",
-      "enabled": true,
-      "defaultServeValue": true,
-      "rules": []
-    },
-    "dark-mode-v2": {
-      "flagKey": "dark-mode-v2",
-      "enabled": false,
-      "defaultServeValue": false,
-      "rules": [
-        {
-          "ruleName": "beta-users",
-          "serveValue": true,
-          "conditions": [
-            {
-              "attribute": "userId",
-              "operator": "IN",
-              "values": ["user-1001", "user-1002", "user-1003"]
-            }
-          ]
-        }
-      ]
-    },
-    "experimental-search": {
-      "flagKey": "experimental-search",
-      "enabled": true,
-      "defaultServeValue": false,
-      "rules": [
-        {
-          "ruleName": "rollout-10pct",
-          "serveValue": true,
-          "conditions": [
-            {
-              "attribute": "userId",
-              "operator": "IN",
-              "values": ["user-5001", "user-5002"]
-            }
-          ]
-        }
-      ]
+  "version" : 1,
+  "flags" : {
+    "flag-multi-rule" : {
+      "flagKey" : "flag-multi-rule",
+      "enabled" : true,
+      "defaultServeValue" : false,
+      "rules" : [ {
+        "conditions" : [ {
+          "values" : [ "US" ],
+          "operator" : "EQUALS",
+          "attribute" : "country"
+        }, {
+          "values" : [ "pro", "enterprise" ],
+          "operator" : "IN",
+          "attribute" : "plan"
+        }, {
+          "values" : [ "blocked-1", "blocked-2" ],
+          "operator" : "NOT_IN",
+          "attribute" : "userId"
+        } ],
+        "ruleName" : "US Pro users",
+        "serveValue" : true
+      }, {
+        "conditions" : [ {
+          "values" : [ "DE", "FR", "UK" ],
+          "operator" : "IN",
+          "attribute" : "country"
+        }, {
+          "values" : [ "true" ],
+          "operator" : "EQUALS",
+          "attribute" : "beta_tester"
+        }, {
+          "values" : [ "10" ],
+          "operator" : "GREATER_THAN",
+          "attribute" : "eval_count"
+        } ],
+        "ruleName" : "EU beta users",
+        "serveValue" : true
+      } ]
     }
   }
 }

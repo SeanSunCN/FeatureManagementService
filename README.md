@@ -27,12 +27,13 @@ Cloud-native feature flag management system with control/data plane separation, 
 │  Pure In-Memory Evaluation       │[redis]│  CRUD Flags/Apps            │
 │  SSE Long Connection Push        │Pub/Sub│  [postgres] Database        │
 │  Rule Engine                     │       │                             │
-└──────┬───────────────────────────┘       └─────────────────────────────┘
-       │
-       │ (Report Hit/Telemetry)
-       ▼
+└──────────────────────────────────┘       └─────────────────────────────┘
+
+
+       
 ┌────────────────────────────────────────────────────────────────────────┐
 │ [ingest-service] (Data Ingestion Layer)                                │
+│ Data From Client & SDK                                                 │
 │  - Pool A: Fire & Forget ──► [redis] High-Frequency Counter            │
 │  - Pool B: Timeout Degradation ──► [kafka] Audit Log                   │
 └──────┬─────────────────────────────────────────────┬───────────────────┘

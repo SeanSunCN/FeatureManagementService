@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Flag CDN Demo — Multi-Component Dashboard</title>
+
+    <script src="/feature-flag-web-sdk.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .dashboard {
+            max-width: 900px;
+            width: 100%;
+        }
+        h1 {
+            font-size: 28px;
+            margin-bottom: 4px;
+        }
+        .subtitle {
+            color: #94a3b8;
+            margin-bottom: 28px;
+            font-size: 14px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #1e293b;
+            border-radius: 14px;
+            padding: 24px;
+            border: 1px solid #334155;
+            transition: all 0.4s ease;
+        }
+        .card h3 {
+            font-size: 15px;
+            color: #94a3b8;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .card .preview {
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            transition: all 0.4s ease;
+        }
+
+        /* ======== Card: Dark Mode ======== */
+        .card-dark-mode .preview {
+            background: #f8fafc;
+            color: #0f172a;
+        }
+        .card-dark-mode.dark .preview {
+            background: #0f172a;
+            color: #e2e8f0;
+            border: 1px solid #334155;
+        }
+
+        /* ======== Card: Beta Badge ======== */
+        .beta-badge {
+            display: none;
+            background: linear-gradient(135deg, #f59e0b, #ef4444);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 20px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        .beta-badge.show { display: inline-block; }
+
+        /* ======== Card: New Search ======== */
+        .search-bar {
+            display: flex;
+            gap: 8px;
+            width: 100%;
+        }
+        .search-bar input {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .search-bar input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+        }
+        .search-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .search-btn.classic {
+            background: #334155;
+            color: #94a3b8;
+        }
+        .search-btn.enhanced {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(59,130,246,0.3);
+        }
+        .search-btn.enhanced:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(59,130,246,0.4);
+        }
+        .search-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ======== Card: Pricing ======== */
+        .pricing-cards {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+        .pricing-card {
+            flex: 1;
+            padding: 14px 10px;
+            border-radius: 10px;
+            background: #0f172a;
+            text-align: center;
+            border: 1px solid #334155;
+            transition: all 0.3s;
+        }
+        .pricing-card .price {
+            font-size: 20px;
+            font-weight: 700;
+            margin: 6px 0;
+        }
+        .pricing-card .price.free { color: #94a3b8; }
+        .pricing-card .price.pro { color: #3b82f6; }
+        .pricing-card .price.enterprise { color: #f59e0b; }
+        .pricing-card.popular {
+            border-color: #3b82f6;
+            box-shadow: 0 0 20px rgba(59,130,246,0.15);
+        }
+        .pricing-card.popular .price.pro { color: #60a5fa; }
+        .pricing-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-bottom: 4px;
+        }
+        .pricing-badge.hidden { display: none; }
+
+        /* ======== Card: Export Button ======== */
+        .export-area {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            width: 100%;
+        }
+        .export-btn {
+            padding: 10px 24px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .export-btn.standard {
+            background: #334155;
+            color: #94a3b8;
+        }
+        .export-btn.quick {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #fff;
+        }
+        .export-btn.quick:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(34,197,94,0.3);
+        }
+        .export-hint {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        /* ======== Bottom bar ======== */
+        .bottom-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 8px;
+            padding: 16px 0;
+        }
+        .diagnostics {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 16px 20px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.7;
+            border: 1px solid #334155;
+        }
+        .diagnostics dt { color: #94a3b8; float: left; clear: left; width: 140px; }
+        .diagnostics dd { margin-left: 140px; }
+        .diagnostics dd.cache-hit { color: #22c55e; }
+        .diagnostics dd.cache-miss { color: #f59e0b; }
+        .diagnostics dd.error { color: #ef4444; }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn:hover { transform: translateY(-1px); }
+        .btn-primary { background: #3b82f6; color: #fff; }
+        .btn-secondary { background: #334155; color: #94a3b8; }
+        .btn-secondary:hover { background: #475569; color: #e2e8f0; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-sm { padding: 6px 14px; font-size: 13px; }
+
+        .footer {
+            margin-top: 16px;
+            font-size: 12px;
+            color: #475569;
+            text-align: center;
+        }
+        .footer a { color: #64748b; text-decoration: none; }
+        .footer a:hover { color: #94a3b8; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <h1>Feature Flag Dashboard</h1>
+    <p class="subtitle" id="subtitle">⏳ Initialising SDK...</p>
+
+    <!-- ======== Grid: 4 cards ======== -->
+    <div class="grid">
+
+        <!-- Card 1: Dark Mode Toggle (flag: dark-mode-v2) -->
+        <div class="card card-dark-mode" id="cardDarkMode">
+            <h3>🌗 Dark Mode <span class="beta-badge" id="betaBadge">BETA</span></h3>
+            <div class="preview" id="darkPreview">
+                <span id="darkLabel">Waiting for flag...</span>
+            </div>
+        </div>
+
+        <!-- Card 2: Search Experience (flag: new-search-portal) -->
+        <div class="card" id="cardSearch">
+            <h3>🔍 Search</h3>
+            <div class="search-bar">
+                <input type="text" placeholder="Search..." disabled id="searchInput">
+                <button class="search-btn classic" id="searchBtn" disabled>Search</button>
+            </div>
+        </div>
+
+        <!-- Card 3: Pricing Page (flag: new-pricing-page) -->
+        <div class="card" id="cardPricing">
+            <h3>💰 Pricing</h3>
+            <div class="pricing-cards">
+                <div class="pricing-card">
+                    <div class="pricing-badge hidden" id="badgeFree">✨ NEW</div>
+                    <div class="price free">$0</div>
+                    <div style="font-size:12px;color:#64748b;">Free</div>
+                </div>
+                <div class="pricing-card popular" id="cardPro">
+                    <div class="pricing-badge" id="badgePro" style="background:#3b82f6;color:#fff;">POPULAR</div>
+                    <div class="price pro">$29</div>
+                    <div style="font-size:12px;color:#64748b;">Pro</div>
+                </div>
+                <div class="pricing-card" id="cardEnterprise">
+                    <div class="pricing-badge hidden" id="badgeEnterprise">🔥 HOT</div>
+                    <div class="price enterprise">$99</div>
+                    <div style="font-size:12px;color:#64748b;">Enterprise</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 4: Quick Export (flag: quick-export) -->
+        <div class="card" id="cardExport">
+            <h3>📤 Export</h3>
+            <div class="export-area">
+                <button class="export-btn standard" id="exportBtn" disabled>Export CSV</button>
+                <span class="export-hint" id="exportHint">Standard export</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======== Diagnostics + Controls ======== -->
+    <div class="bottom-bar">
+        <div class="diagnostics">
+            <dl>
+                <dt>SDK State:</dt><dd id="ddState">—</dd>
+                <dt>Flags Cache:</dt><dd id="ddFlagCount">—</dd>
+                <dt>Manifest Ver:</dt><dd id="ddVersion">—</dd>
+                <dt>Cache Hit:</dt><dd id="ddCache">—</dd>
+            </dl>
+        </div>
+        <div class="controls">
+            <button class="btn btn-primary" id="refreshBtn">↻ Re-init SDK</button>
+            <button class="btn btn-secondary btn-sm" id="evalBtn">▶ Re-evaluate</button>
+            <button class="btn btn-secondary btn-sm" id="forceRefresh">⏩ Force Re-fetch</button>
+        </div>
+    </div>
+
+    <div class="footer">
+        CDN: <span id="cdnUrlDisplay">http://localhost:8084</span>
+        &nbsp;|&nbsp;
+        SDK loaded: <span id="sdkLoaded">false</span>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    const CDN_BASE = 'http://localhost:8084';
+    const CTX = { userId: 'demo-user', attributes: { region: 'us-east', plan: 'pro' } };
+
+    // DOM refs
+    const subtitle = document.getElementById('subtitle');
+    const ddState = document.getElementById('ddState');
+    const ddFlagCount = document.getElementById('ddFlagCount');
+    const ddVersion = document.getElementById('ddVersion');
+    const ddCache = document.getElementById('ddCache');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const evalBtn = document.getElementById('evalBtn');
+    const forceEl = document.getElementById('forceRefresh');
+
+    // ================================================================
+    //  Render all components based on flag states
+    // ================================================================
+
+    function renderAll() {
+        if (!window.FeatureFlagSDK) return;
+
+        // --- Dark Mode (flag: dark-mode-v2) ---
+        const dark = FeatureFlagSDK.isEnabled('dark-mode-v2', CTX);
+        const card = document.getElementById('cardDarkMode');
+        const label = document.getElementById('darkLabel');
+        card.classList.toggle('dark', dark);
+        label.textContent = dark ? '🌙 Dark mode ACTIVE' : '☀️ Light mode (default)';
+
+        // --- Beta Badge (flag: new-ui-portal) ---
+        const beta = FeatureFlagSDK.isEnabled('new-ui-portal', CTX);
+        document.getElementById('betaBadge').classList.toggle('show', beta);
+
+        // --- Search (flag: new-search-portal) ---
+        const searchEnabled = FeatureFlagSDK.isEnabled('new-search-portal', CTX);
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        searchInput.disabled = !searchEnabled;
+        searchBtn.disabled = !searchEnabled;
+        if (searchEnabled) {
+            searchBtn.className = 'search-btn enhanced';
+            searchBtn.textContent = '🔎 Smart Search';
+            searchInput.placeholder = 'AI-powered search...';
+        } else {
+            searchBtn.className = 'search-btn classic';
+            searchBtn.textContent = 'Search';
+            searchInput.placeholder = 'Search... (disabled)';
+        }
+
+        // --- Pricing Page (flag: new-pricing-page) ---
+        const newPricing = FeatureFlagSDK.isEnabled('new-pricing-page', CTX);
+        document.getElementById('badgeFree').classList.toggle('hidden', !newPricing);
+        document.getElementById('badgeEnterprise').classList.toggle('hidden', !newPricing);
+
+        // --- Quick Export (flag: quick-export) ---
+        const quickExport = FeatureFlagSDK.isEnabled('quick-export', CTX);
+        const exportBtn = document.getElementById('exportBtn');
+        const exportHint = document.getElementById('exportHint');
+        exportBtn.disabled = false;
+        if (quickExport) {
+            exportBtn.className = 'export-btn quick';
+            exportBtn.textContent = '⚡ Quick Export';
+            exportHint.textContent = 'One-click CSV export enabled';
+        } else {
+            exportBtn.className = 'export-btn standard';
+            exportBtn.textContent = 'Export CSV';
+            exportHint.textContent = 'Standard export (legacy)';
+        }
+
+        // --- Diagnostics ---
+        renderDiag();
+    }
+
+    function renderDiag() {
+        let diag;
+        try { diag = FeatureFlagSDK.getDiagnostics(); } catch (e) { diag = null; }
+        if (!diag) {
+            ddState.textContent = 'NOT READY';
+            return;
+        }
+        ddState.textContent = diag.flagCount > 0 ? 'READY' : 'EMPTY';
+        ddFlagCount.textContent = String(diag.flagCount);
+        ddVersion.textContent = String(diag.version);
+        ddCache.textContent = diag.fromCache ? '✅ DISK CACHE' : '⚠ NETWORK';
+        ddCache.className = diag.fromCache ? 'cache-hit' : 'cache-miss';
+        document.getElementById('sdkLoaded').textContent = 'true';
+    }
+
+    // ================================================================
+    //  Init
+    // ================================================================
+
+    async function init() {
+        subtitle.textContent = '⏳ Loading rules from CDN...';
+        refreshBtn.disabled = true;
+        try {
+            if (window.performance && performance.clearResourceTimings)
+                performance.clearResourceTimings();
+
+            await FeatureFlagSDK.initSdk(CDN_BASE);
+            subtitle.textContent = '✓ SDK ready — ' + FeatureFlagSDK.getDiagnostics().flagCount + ' flags loaded';
+            refreshBtn.disabled = false;
+            renderAll();
+        } catch (err) {
+            subtitle.textContent = '✗ Failed: ' + err.message;
+            ddState.textContent = 'ERROR';
+            ddState.className = 'error';
+            refreshBtn.disabled = false;
+        }
+    }
+
+    // Event listeners
+    refreshBtn.addEventListener('click', init);
+    evalBtn.addEventListener('click', renderAll);
+    forceEl.addEventListener('click', function () {
+        console.log('[Demo] Force re-fetch');
+        init();
+    });
+
+    document.getElementById('cdnUrlDisplay').textContent = CDN_BASE;
+
+    // GO
+    init();
+
+    // Auto re-evaluate on visibility change
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && !refreshBtn.disabled) renderAll();
+    });
+})();
+</script>
+
+</body>
+</html>
