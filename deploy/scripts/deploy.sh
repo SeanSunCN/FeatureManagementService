@@ -91,6 +91,11 @@ for port in 8080 8081 8082 8083; do
   fi
 done
 
+# ---------- 6. Setup demo data with complex rules ----------
+echo ""
+echo "[6/5] Setting up demo flags with complex rules..."
+bash deploy/scripts/setup-demo.sh "http://localhost:8080" || true
+
 echo ""
 echo "========================================"
 echo " Summary"

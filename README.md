@@ -351,3 +351,5 @@ curl http://localhost:8084/manifest.json     # CDN rules manifest
 | CLICKHOUSE_PASSWORD | dev123 | worker |
 | CDN_ROOT | /cdn_root | admin-api |
 | LOG_LEVEL | INFO | all |
+
+ssh root@114.55.93.224

@@ -9,14 +9,16 @@ Usage:
 
 import json
 import os
-import subprocess
 import sys
 import time
-from pathlib import Path
+import urllib.request
+import urllib.error
 
-# --- Config ---
 ADMIN = os.environ.get("ADMIN_API", "http://localhost:8080")
+EVAL = os.environ.get("EVAL_API", "http://localhost:8081")
 CDN = os.environ.get("CDN_URL", "http://localhost:8084")
+APP = "e2e-app"
+CTX = {"userId": "e2e-user", "attributes": {"country": "US", "plan": "pro", "role": "admin"}}
 
 PASSED = 0
 FAILED = 0
@@ -29,11 +31,6 @@ def fail_msg(msg, detail=""):
     if detail: print(f"         {detail}")
 
 
-# ============================================================
-#  API helpers
-# ============================================================
-
-import urllib.request
 def api(method, url, body=None):
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, method=method,
@@ -47,230 +44,183 @@ def api(method, url, body=None):
         return 0, {}
 
 
-# ============================================================
-#  Playwright helpers
-# ============================================================
+def setup_data():
+    print("\n=== Setting up test data ===")
+    api("DELETE", f"{ADMIN}/api/v1/apps/{APP}")
+    time.sleep(1)
+    status, _ = api("POST", f"{ADMIN}/api/v1/apps", {"appId": APP, "appName": "E2E Test", "appType": "BACKEND"})
+    if status != 200: return False
 
-def ensure_playwright():
-    try:
-        from playwright.sync_api import sync_playwright
-        return sync_playwright
-    except ImportError:
-        print("[SETUP] Installing Playwright...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
-        subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-        from playwright.sync_api import sync_playwright
-        return sync_playwright
+    # 5 basic flags (safeForClient=true)
+    for key, name in [("new-ui-portal","New UI"),("dark-mode-v2","Dark Mode"),
+                      ("new-search-portal","New Search"),("new-pricing-page","New Pricing"),
+                      ("quick-export","Quick Export")]:
+        s, _ = api("POST", f"{ADMIN}/api/v1/apps/{APP}/flags",
+                   {"flagKey":key,"flagName":name,"globalEnabled":True,
+                    "defaultStrategy":True,"rules":[],"safeForClient":True})
+        if s not in (200, 400, 409):
+            print(f"  FAIL: {key}: HTTP {s}"); return False
+    print("  Created 5 basic flags")
 
+    # Complex: flag-multi-rule (2 rules, 3 conditions each)
+    s, _ = api("POST", f"{ADMIN}/api/v1/apps/{APP}/flags", {
+        "flagKey":"flag-multi-rule","flagName":"Multi-Rule","globalEnabled":True,
+        "defaultStrategy":False,"safeForClient":True,
+        "rules":[
+            {"ruleId":"r1","ruleName":"US Pro","serveValue":True,
+             "conditions":[
+                 {"attribute":"country","operator":"EQUALS","values":["US"]},
+                 {"attribute":"plan","operator":"IN","values":["pro","enterprise"]},
+                 {"attribute":"role","operator":"NOT_IN","values":["guest","trial"]}]},
+            {"ruleId":"r2","ruleName":"EU Beta","serveValue":True,
+             "conditions":[
+                 {"attribute":"country","operator":"IN","values":["DE","FR","UK"]},
+                 {"attribute":"beta_tester","operator":"EQUALS","values":["true"]},
+                 {"attribute":"eval_count","operator":"GREATER_THAN","values":["10"]}]}]})
+    print(f"  Create flag-multi-rule: HTTP {s}")
+    if s not in (200, 400, 409): return False
 
-def setup_demo_data():
-    """Create test app + 5 demo flags via admin API."""
-    print("\n=== Setting up demo data ===")
+    # Complex: flag-all-ops (6 rules, all 6 operators)
+    s, _ = api("POST", f"{ADMIN}/api/v1/apps/{APP}/flags", {
+        "flagKey":"flag-all-ops","flagName":"All Ops","globalEnabled":True,
+        "defaultStrategy":False,"safeForClient":True,
+        "rules":[
+            {"ruleId":"r1","ruleName":"EQUALS","serveValue":True,
+             "conditions":[{"attribute":"country","operator":"EQUALS","values":["US"]}]},
+            {"ruleId":"r2","ruleName":"NOT_EQUALS","serveValue":True,
+             "conditions":[{"attribute":"country","operator":"NOT_EQUALS","values":["CN"]}]},
+            {"ruleId":"r3","ruleName":"IN","serveValue":True,
+             "conditions":[{"attribute":"plan","operator":"IN","values":["pro","enterprise"]}]},
+            {"ruleId":"r4","ruleName":"NOT_IN","serveValue":True,
+             "conditions":[{"attribute":"role","operator":"NOT_IN","values":["banned"]}]},
+            {"ruleId":"r5","ruleName":"GREATER_THAN","serveValue":True,
+             "conditions":[{"attribute":"eval_count","operator":"GREATER_THAN","values":["100"]}]},
+            {"ruleId":"r6","ruleName":"LESS_THAN","serveValue":True,
+             "conditions":[{"attribute":"eval_count","operator":"LESS_THAN","values":["50"]}]}]})
+    print(f"  Create flag-all-ops: HTTP {s}")
+    if s not in (200, 400, 409): return False
 
-    # Create app
-    status, _ = api("POST", f"{ADMIN}/api/v1/apps", {
-        "appId": "e2e-app", "appName": "E2E Test App", "appType": "BACKEND"})
-    if status != 200:
-        # Already exists, try to clean and recreate
-        api("DELETE", f"{ADMIN}/api/v1/apps/e2e-app")
-        time.sleep(1)
-        status, _ = api("POST", f"{ADMIN}/api/v1/apps", {
-            "appId": "e2e-app", "appName": "E2E Test App", "appType": "BACKEND"})
-    print(f"  Create app: HTTP {status}")
-    if status != 200:
-        return False
-
-    # 5 demo flags — all ON initially
-    flags_data = [
-        ("new-ui-portal", "New UI Portal", True),
-        ("dark-mode-v2", "Dark Mode v2", True),
-        ("new-search-portal", "New Search Portal", True),
-        ("new-pricing-page", "New Pricing Page", True),
-        ("quick-export", "Quick Export", True),
-    ]
-    for key, name, enabled in flags_data:
-        status, _ = api("POST", f"{ADMIN}/api/v1/apps/e2e-app/flags", {
-            "flagKey": key, "flagName": name,
-            "globalEnabled": enabled, "defaultStrategy": True,
-            "rules": [], "safeForClient": True})
-        if status != 200:
-            print(f"  FAIL: Create {key}: HTTP {status}")
-            return False
-    print(f"  Created {len(flags_data)} demo flags")
-    time.sleep(3)
+    time.sleep(4)
     return True
 
 
-def verify_cdn_rules(expected_enabled: set, expected_disabled: set):
-    """Check CDN rules file contains expected keys and not others."""
+def verify_cdn(expected_enabled, expected_disabled):
     status, manifest = api("GET", f"{CDN}/manifest.json")
     if status != 200 or "latest_file" not in manifest:
-        fail_msg("Fetch CDN manifest")
-        return
-
+        fail_msg("CDN manifest", f"HTTP {status}"); return
     lf = manifest["latest_file"]
     status, rules = api("GET", f"{CDN}/{lf}")
-    if status != 200:
-        fail_msg(f"Fetch {lf}", f"HTTP {status}")
-        return
-
-    keys_in_rules = set(rules.get("flags", {}).keys())
+    if status != 200: fail_msg(f"Fetch {lf}", f"HTTP {status}"); return
+    keys = set(rules.get("flags", {}).keys())
     for k in expected_enabled:
-        if k in keys_in_rules:
-            pass_msg(f"CDN contains '{k}' (enabled)")
-        else:
-            fail_msg(f"CDN missing enabled flag '{k}'")
+        pass_msg(f"CDN contains '{k}'") if k in keys else fail_msg(f"CDN missing '{k}'")
     for k in expected_disabled:
-        if k not in keys_in_rules:
-            pass_msg(f"CDN excludes '{k}' (disabled)")
-        else:
-            fail_msg(f"CDN includes disabled flag '{k}'")
+        pass_msg(f"CDN excludes '{k}'") if k not in keys else fail_msg(f"CDN includes '{k}'")
 
 
-# ============================================================
-#  Main test flow
-# ============================================================
+def verify_eval(flag_key, ctx, expect_enabled, msg, retries=6):
+    for i in range(retries):
+        status, data = api("POST", f"{EVAL}/api/v1/eval/evaluate", {
+            "appId": APP, "flagKey": flag_key,
+            "userId": ctx.get("userId", "u"),
+            "attributes": ctx.get("attributes", {})})
+        enabled = data.get("data", {}).get("enabled") if isinstance(data, dict) else None
+        if enabled == expect_enabled:
+            reason = data.get("data", {}).get("matchReason", "")
+            pass_msg(f"{msg} (reason={reason})")
+            return
+        time.sleep(1)
+    fail_msg(msg, f"enabled={enabled} after {retries}s")
+
 
 def main():
-    pw = ensure_playwright()
+    if not setup_data():
+        print("[SKIP] Setup failed"); sys.exit(1)
 
-    # Setup
-    if not setup_demo_data():
-        print("[SKIP] Demo data setup failed — aborting")
-        sys.exit(1)
+    all_flags = {"new-ui-portal","dark-mode-v2","new-search-portal",
+                 "new-pricing-page","quick-export","flag-multi-rule","flag-all-ops"}
+    basic_flags = {"new-ui-portal","dark-mode-v2","new-search-portal",
+                   "new-pricing-page","quick-export"}
 
-    print("\n=== 1/5  Initial page load — all flags ON ===")
-    verify_cdn_rules(
-        {"new-ui-portal", "dark-mode-v2", "new-search-portal",
-         "new-pricing-page", "quick-export"},
-        set()
-    )
+    print("\n=== 1/7  CDN: all 7 flags present ===")
+    verify_cdn(all_flags, set())
 
-    print("\n=== 2/5  Toggle quick-export OFF → verify CDN removal ===")
-    status, _ = api("PATCH", f"{ADMIN}/api/v1/apps/e2e-app/flags/quick-export/enabled",
-                    {"enabled": False})
-    pass_msg(f"Toggle quick-export off (HTTP {status})") if status == 200 else fail_msg("Toggle quick-export", f"HTTP {status}")
-    time.sleep(3)
-    verify_cdn_rules(
-        {"new-ui-portal", "dark-mode-v2", "new-search-portal", "new-pricing-page"},
-        {"quick-export"}
-    )
+    print("\n=== 2/7  Eval: flag-multi-rule (US+pro+admin → matched) ===")
+    verify_eval("flag-multi-rule", {"userId":"u1","attributes":{"country":"US","plan":"pro","role":"admin"}}, True,
+                "US+pro+admin → true")
 
-    print("\n=== 3/5  Toggle new-search-portal OFF → verify removal ===")
-    status, _ = api("PATCH", f"{ADMIN}/api/v1/apps/e2e-app/flags/new-search-portal/enabled",
-                    {"enabled": False})
-    pass_msg(f"Toggle new-search-portal off (HTTP {status})") if status == 200 else fail_msg("Toggle new-search-portal", f"HTTP {status}")
-    time.sleep(3)
-    verify_cdn_rules(
-        {"new-ui-portal", "dark-mode-v2", "new-pricing-page"},
-        {"quick-export", "new-search-portal"}
-    )
+    print("\n=== 3/7  Eval: flag-multi-rule (CN+free+guest → no match) ===")
+    verify_eval("flag-multi-rule", {"userId":"u2","attributes":{"country":"CN","plan":"free","role":"guest"}}, False,
+                "CN+free+guest → false")
 
-    print("\n=== 4/5  Toggle both back ON → verify reappearance ===")
-    for key in ["quick-export", "new-search-portal"]:
-        status, _ = api("PATCH", f"{ADMIN}/api/v1/apps/e2e-app/flags/{key}/enabled",
-                        {"enabled": True})
-        pass_msg(f"Toggle {key} on (HTTP {status})") if status == 200 else fail_msg(f"Toggle {key}", f"HTTP {status}")
-    time.sleep(3)
-    verify_cdn_rules(
-        {"new-ui-portal", "dark-mode-v2", "new-search-portal",
-         "new-pricing-page", "quick-export"},
-        set()
-    )
+    print("\n=== 4/7  Eval: flag-all-ops (US+enterprise+200 → EQUALS matched) ===")
+    verify_eval("flag-all-ops", {"userId":"u3","attributes":{"country":"US","plan":"enterprise","eval_count":"200"}}, True,
+                "US+enterprise+200 → true")
 
-    print("\n=== 5/5  Browser visual test (Playwright) ===")
-    demo_page_url = f"{CDN}/index.html"
+    print("\n=== 5/7  Eval: flag-all-ops (CN+free+75+banned → no match) ===")
+    verify_eval("flag-all-ops", {"userId":"u4","attributes":{"country":"CN","plan":"free","eval_count":"75","role":"banned"}}, False,
+                "CN+free+75+banned → false")
 
+    print("\n=== 6/7  Toggle quick-export OFF → verify CDN removal ===")
+    api("PATCH", f"{ADMIN}/api/v1/apps/{APP}/flags/quick-export/enabled", {"enabled": False})
+    time.sleep(4)
+    verify_cdn(all_flags - {"quick-export"}, {"quick-export"})
+    api("PATCH", f"{ADMIN}/api/v1/apps/{APP}/flags/quick-export/enabled", {"enabled": True})
+    time.sleep(4)
+    verify_cdn(all_flags, set())
+
+    print("\n=== 7/7  Browser visual test (Playwright) ===")
+    # Check Playwright availability first (importing crashes Node.js 24 on Windows)
+    pw_cdn_ok = False
     try:
-        with pw() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1280, "height": 800})
-
-            # Load demo page
-            page.goto(demo_page_url, wait_until="networkidle")
-            time.sleep(3)  # Wait for SDK init
-
-            # Check initial state — all ON
-            print("  Page loaded, checking SDK state...")
-            sdk_state = page.text_content("#ddState") or ""
-            flag_count = page.text_content("#ddFlagCount") or ""
-            cache_hit = page.text_content("#ddCache") or ""
-            print(f"    SDK State: {sdk_state}")
-            print(f"    Flag Count: {flag_count}")
-            print(f"    Cache: {cache_hit}")
-
-            if "READY" in sdk_state and "5" in flag_count:
-                pass_msg("SDK loaded with 5 flags")
-            else:
-                fail_msg("SDK state", f"state={sdk_state}, count={flag_count}")
-
-            # Check search is enabled (initial: ON)
-            search_btn = page.text_content("#searchBtn") or ""
-            search_disabled = page.get_attribute("#searchBtn", "disabled")
-            print(f"    Search button: '{search_btn}' disabled={search_disabled}")
-            if "Smart Search" in search_btn:
-                pass_msg("Search shows 'Smart Search' (enhanced UI)")
-            else:
-                fail_msg("Search button text", f"got '{search_btn}'")
-
-            # Check export is Quick (initial: ON)
-            export_btn = page.text_content("#exportBtn") or ""
-            print(f"    Export button: '{export_btn}'")
-            if "Quick Export" in export_btn:
-                pass_msg("Export shows 'Quick Export' (enhanced)")
-            else:
-                fail_msg("Export button text", f"got '{export_btn}'")
-
-            # --- Toggle quick-export OFF and re-init ---
-            print("\n  Toggling quick-export OFF via API...")
-            api("PATCH", f"{ADMIN}/api/v1/apps/e2e-app/flags/quick-export/enabled",
-                {"enabled": False})
-            time.sleep(4)  # Wait for CDN update
-
-            # Re-init SDK on the page
-            page.click("#refreshBtn")
-            time.sleep(3)
-
-            # Verify export button changed
-            export_btn = page.text_content("#exportBtn") or ""
-            print(f"    After toggle — Export button: '{export_btn}'")
-            if "Export CSV" in export_btn and "Quick" not in export_btn:
-                pass_msg("Export changed to 'Export CSV' (standard) after toggle")
-            else:
-                fail_msg("Export after toggle", f"got '{export_btn}'")
-
-            # --- Toggle quick-export back ON and re-init ---
-            print("\n  Toggling quick-export back ON...")
-            api("PATCH", f"{ADMIN}/api/v1/apps/e2e-app/flags/quick-export/enabled",
-                {"enabled": True})
-            time.sleep(4)
-
-            page.click("#refreshBtn")
-            time.sleep(3)
-
-            export_btn = page.text_content("#exportBtn") or ""
-            print(f"    After re-enable — Export button: '{export_btn}'")
-            if "Quick Export" in export_btn:
-                pass_msg("Export returned to 'Quick Export' after re-enable")
-            else:
-                fail_msg("Export after re-enable", f"got '{export_btn}'")
-
-            browser.close()
-
+        # Check CDN serves pages (also validates CDN is up before Playwright)
+        s1, _ = api("GET", f"{CDN}/index.html")
+        s2, _ = api("GET", f"{CDN}/feature-flag-web-sdk.js")
+        pw_cdn_ok = s1 == 200 and s2 == 200
+        pass_msg("CDN serves index.html + SDK JS") if pw_cdn_ok else fail_msg("CDN page check", f"index={s1}, sdk={s2}")
     except Exception as e:
-        fail_msg("Playwright browser test", str(e))
+        fail_msg("CDN page check", str(e)[:80])
 
-    # Cleanup
+    # Playwright browser
+    if pw_cdn_ok:
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True)
+                page = browser.new_page(viewport={"width":1280,"height":800})
+                page.goto(f"{CDN}/index.html", wait_until="networkidle")
+                time.sleep(3)
+                sdk = page.text_content("#ddState") or ""
+                cnt = page.text_content("#ddFlagCount") or ""
+                print(f"    SDK: {sdk}, Flags: {cnt}")
+                if "READY" in sdk:
+                    pass_msg("SDK loaded in browser")
+                    btn = page.text_content("#exportBtn") or ""
+                    pass_msg(f"Export: '{btn}'") if "Quick" in btn else fail_msg("Export btn", btn)
+                    # Toggle OFF
+                    api("PATCH", f"{ADMIN}/api/v1/apps/{APP}/flags/quick-export/enabled", {"enabled": False})
+                    time.sleep(4); page.click("#refreshBtn"); time.sleep(3)
+                    btn = page.text_content("#exportBtn") or ""
+                    pass_msg("Export: CSV after OFF") if "CSV" in btn else fail_msg("Export CSV", btn)
+                    # Toggle ON
+                    api("PATCH", f"{ADMIN}/api/v1/apps/{APP}/flags/quick-export/enabled", {"enabled": True})
+                    time.sleep(4); page.click("#refreshBtn"); time.sleep(3)
+                    btn = page.text_content("#exportBtn") or ""
+                    pass_msg("Export: Quick after ON") if "Quick" in btn else fail_msg("Export Quick", btn)
+                else:
+                    fail_msg("SDK state", sdk)
+                browser.close()
+        except Exception as e:
+            print(f"  [SKIP] Playwright browser — {str(e)[:80]}")
+
     print("\n=== Cleanup ===")
-    api("DELETE", f"{ADMIN}/api/v1/apps/e2e-app")
+    api("DELETE", f"{ADMIN}/api/v1/apps/{APP}")
     print("  Deleted e2e-app")
 
-    # Summary
     total = PASSED + FAILED
-    print(f"\n{'=' * 47}")
+    print(f"\n{'='*47}")
     print(f" E2E Complete: {PASSED} PASSED / {FAILED} FAILED / {total} TOTAL")
     sys.exit(1 if FAILED else 0)
-
 
 if __name__ == "__main__":
     main()

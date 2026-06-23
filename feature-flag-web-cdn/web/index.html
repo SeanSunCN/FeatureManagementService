@@ -171,6 +171,56 @@
         }
         .pricing-badge.hidden { display: none; }
 
+        /* ======== Second row cards ======== */
+        .grid.second-row {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+
+        .content-box {
+            background: #0f172a;
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid #334155;
+            transition: all 0.4s ease;
+            text-align: center;
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .content-box .label {
+            font-size: 13px;
+            color: #94a3b8;
+            margin-bottom: 6px;
+        }
+        .content-box .value {
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .content-box .value.highlight { color: #22c55e; }
+        .content-box .value.muted { color: #64748b; }
+        .content-box .value.warning { color: #f59e0b; }
+        .content-box .value.accent { color: #3b82f6; }
+
+        .rollout-bar {
+            width: 100%;
+            height: 8px;
+            background: #1e293b;
+            border-radius: 4px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .rollout-bar .fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s ease;
+        }
+        .rollout-bar .fill.active { background: linear-gradient(90deg, #22c55e, #16a34a); width: 70%; }
+        .rollout-bar .fill.slow { background: linear-gradient(90deg, #3b82f6, #2563eb); width: 30%; }
+        .rollout-bar .fill.none { width: 0%; }
+
         /* ======== Card: Export Button ======== */
         .export-area {
             display: flex;
@@ -316,6 +366,39 @@
         </div>
     </div>
 
+    <!-- ======== Second Row: 3 cards with complex rules ======== -->
+    <div class="grid second-row">
+
+        <!-- Card 5: Targeted Content (flag: new-ui-portal) -->
+        <div class="card" id="cardTargetedContent">
+            <h3>🎯 Targeted Content</h3>
+            <div class="content-box" id="contentBox1">
+                <div class="label" id="tcLabel">Evaluating...</div>
+                <div class="value" id="tcValue">⏳</div>
+            </div>
+        </div>
+
+        <!-- Card 6: Analytics Dashboard (flag: dark-mode-v2) -->
+        <div class="card" id="cardAnalytics">
+            <h3>📊 Analytics</h3>
+            <div class="content-box" id="contentBox2">
+                <div class="label" id="anLabel">Evaluating...</div>
+                <div class="value" id="anValue">⏳</div>
+            </div>
+        </div>
+
+        <!-- Card 7: Progressive Rollout (flag: quick-export) -->
+        <div class="card" id="cardRollout">
+            <h3>🔄 Progressive Rollout</h3>
+            <div class="content-box" id="contentBox3">
+                <div class="label" id="prLabel">Evaluating...</div>
+                <div class="value" id="prValue">⏳</div>
+            </div>
+            <div class="rollout-bar"><div class="fill" id="rolloutFill"></div></div>
+        </div>
+
+    </div>
+
     <!-- ======== Diagnostics + Controls ======== -->
     <div class="bottom-bar">
         <div class="diagnostics">
@@ -330,6 +413,12 @@
             <button class="btn btn-primary" id="refreshBtn">↻ Re-init SDK</button>
             <button class="btn btn-secondary btn-sm" id="evalBtn">▶ Re-evaluate</button>
             <button class="btn btn-secondary btn-sm" id="forceRefresh">⏩ Force Re-fetch</button>
+            <span style="margin-left:12px;color:#64748b;font-size:13px;">Profile:</span>
+            <select id="profileSelect" style="background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:4px 8px;font-size:13px;">
+                <option value="us-pro">🇺🇸 US Pro Admin</option>
+                <option value="eu-beta">🇪🇺 EU Beta Tester</option>
+                <option value="cn-free">🇨🇳 CN Free Guest</option>
+            </select>
         </div>
     </div>
 
@@ -345,7 +434,18 @@
     'use strict';
 
     const CDN_BASE = 'http://localhost:8084';
-    const CTX = { userId: 'demo-user', attributes: { region: 'us-east', plan: 'pro' } };
+    const PROFILES = {
+        'us-pro': { userId: 'demo-user', attributes: { plan: 'pro', country: 'US',
+            beta_tester: 'false', eval_count: '150', role: 'admin' } },
+        'eu-beta': { userId: 'beta-user', attributes: { plan: 'pro', country: 'DE',
+            beta_tester: 'true', eval_count: '30', role: 'member' } },
+        'cn-free': { userId: 'guest-user', attributes: { plan: 'free', country: 'CN',
+            beta_tester: 'false', eval_count: '5', role: 'guest' } },
+    };
+    function getCtx() {
+        const sel = document.getElementById('profileSelect');
+        return PROFILES[sel.value] || PROFILES['us-pro'];
+    }
 
     // DOM refs
     const subtitle = document.getElementById('subtitle');
@@ -365,18 +465,18 @@
         if (!window.FeatureFlagSDK) return;
 
         // --- Dark Mode (flag: dark-mode-v2) ---
-        const dark = FeatureFlagSDK.isEnabled('dark-mode-v2', CTX);
+        const dark = FeatureFlagSDK.isEnabled('dark-mode-v2', getCtx());
         const card = document.getElementById('cardDarkMode');
         const label = document.getElementById('darkLabel');
         card.classList.toggle('dark', dark);
         label.textContent = dark ? '🌙 Dark mode ACTIVE' : '☀️ Light mode (default)';
 
         // --- Beta Badge (flag: new-ui-portal) ---
-        const beta = FeatureFlagSDK.isEnabled('new-ui-portal', CTX);
+        const beta = FeatureFlagSDK.isEnabled('new-ui-portal', getCtx());
         document.getElementById('betaBadge').classList.toggle('show', beta);
 
         // --- Search (flag: new-search-portal) ---
-        const searchEnabled = FeatureFlagSDK.isEnabled('new-search-portal', CTX);
+        const searchEnabled = FeatureFlagSDK.isEnabled('new-search-portal', getCtx());
         const searchInput = document.getElementById('searchInput');
         const searchBtn = document.getElementById('searchBtn');
         searchInput.disabled = !searchEnabled;
@@ -392,12 +492,12 @@
         }
 
         // --- Pricing Page (flag: new-pricing-page) ---
-        const newPricing = FeatureFlagSDK.isEnabled('new-pricing-page', CTX);
+        const newPricing = FeatureFlagSDK.isEnabled('new-pricing-page', getCtx());
         document.getElementById('badgeFree').classList.toggle('hidden', !newPricing);
         document.getElementById('badgeEnterprise').classList.toggle('hidden', !newPricing);
 
         // --- Quick Export (flag: quick-export) ---
-        const quickExport = FeatureFlagSDK.isEnabled('quick-export', CTX);
+        const quickExport = FeatureFlagSDK.isEnabled('quick-export', getCtx());
         const exportBtn = document.getElementById('exportBtn');
         const exportHint = document.getElementById('exportHint');
         exportBtn.disabled = false;
@@ -411,8 +511,72 @@
             exportHint.textContent = 'Standard export (legacy)';
         }
 
+        // --- Second row: complex rules demo ---
+        renderSecondRow();
+
         // --- Diagnostics ---
         renderDiag();
+    }
+
+    // ================================================================
+    //  Second Row — complex rule matching
+    // ================================================================
+
+    function renderSecondRow() {
+        if (!window.FeatureFlagSDK) return;
+
+        // Card 5: Targeted Content (new-ui-portal)
+        const tcEnabled = FeatureFlagSDK.isEnabled('new-ui-portal', getCtx());
+        const tcLabel = document.getElementById('tcLabel');
+        const tcValue = document.getElementById('tcValue');
+        if (tcEnabled) {
+            tcLabel.textContent = '✨ Premium content unlocked';
+            tcValue.textContent = '🎉 Welcome to the new UI!';
+            tcValue.className = 'value highlight';
+        } else {
+            tcLabel.textContent = 'Standard content (no matching rule)';
+            tcValue.textContent = '💤 Default view';
+            tcValue.className = 'value muted';
+        }
+
+        // Card 6: Analytics (dark-mode-v2)
+        const anEnabled = FeatureFlagSDK.isEnabled('dark-mode-v2', getCtx());
+        const anLabel = document.getElementById('anLabel');
+        const anValue = document.getElementById('anValue');
+        if (anEnabled) {
+            anLabel.textContent = 'Advanced analytics dashboard';
+            anValue.textContent = '📈 Full metrics suite';
+            anValue.className = 'value accent';
+        } else {
+            anLabel.textContent = 'Basic analytics (27 rules matched?)';
+            anValue.textContent = '📊 Simple overview';
+            anValue.className = 'value muted';
+        }
+
+        // Card 7: Progressive Rollout (quick-export)
+        const prEnabled = FeatureFlagSDK.isEnabled('quick-export', getCtx());
+        const prLabel = document.getElementById('prLabel');
+        const prValue = document.getElementById('prValue');
+        const rolloutFill = document.getElementById('rolloutFill');
+        if (prEnabled) {
+            // Check which rule matched by looking at context
+            if (getCtx().attributes.beta_tester === 'true') {
+                prLabel.textContent = 'Beta feature — 70% rollout';
+                prValue.textContent = '🧪 Beta access granted';
+                prValue.className = 'value warning';
+                rolloutFill.className = 'fill active';
+            } else {
+                prLabel.textContent = 'Gradual rollout — US/DE/UK + paid plan';
+                prValue.textContent = '🌍 Export enabled in your region';
+                prValue.className = 'value highlight';
+                rolloutFill.className = 'fill slow';
+            }
+        } else {
+            prLabel.textContent = 'Not yet available in your segment';
+            prValue.textContent = '🔒 Coming soon';
+            prValue.className = 'value muted';
+            rolloutFill.className = 'fill none';
+        }
     }
 
     function renderDiag() {
@@ -465,6 +629,9 @@
 
     // GO
     init();
+
+    // Auto re-evaluate on profile change
+    document.getElementById('profileSelect').addEventListener('change', renderAll);
 
     // Auto re-evaluate on visibility change
     document.addEventListener('visibilitychange', function () {

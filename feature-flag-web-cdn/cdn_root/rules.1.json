@@ -6,37 +6,37 @@
       "enabled" : true,
       "defaultServeValue" : false,
       "rules" : [ {
-        "conditions" : [ {
-          "values" : [ "US" ],
-          "operator" : "EQUALS",
-          "attribute" : "country"
-        }, {
-          "values" : [ "pro", "enterprise" ],
-          "operator" : "IN",
-          "attribute" : "plan"
-        }, {
-          "values" : [ "blocked-1", "blocked-2" ],
-          "operator" : "NOT_IN",
-          "attribute" : "userId"
-        } ],
+        "serveValue" : true,
         "ruleName" : "US Pro users",
-        "serveValue" : true
-      }, {
         "conditions" : [ {
-          "values" : [ "DE", "FR", "UK" ],
-          "operator" : "IN",
-          "attribute" : "country"
-        }, {
-          "values" : [ "true" ],
+          "attribute" : "country",
           "operator" : "EQUALS",
-          "attribute" : "beta_tester"
+          "values" : [ "US" ]
         }, {
-          "values" : [ "10" ],
-          "operator" : "GREATER_THAN",
-          "attribute" : "eval_count"
-        } ],
+          "attribute" : "plan",
+          "operator" : "IN",
+          "values" : [ "pro", "enterprise" ]
+        }, {
+          "attribute" : "role",
+          "operator" : "NOT_IN",
+          "values" : [ "guest", "trial" ]
+        } ]
+      }, {
+        "serveValue" : true,
         "ruleName" : "EU beta users",
-        "serveValue" : true
+        "conditions" : [ {
+          "attribute" : "country",
+          "operator" : "IN",
+          "values" : [ "DE", "FR", "UK" ]
+        }, {
+          "attribute" : "beta_tester",
+          "operator" : "EQUALS",
+          "values" : [ "true" ]
+        }, {
+          "attribute" : "eval_count",
+          "operator" : "GREATER_THAN",
+          "values" : [ "10" ]
+        } ]
       } ]
     }
   }
