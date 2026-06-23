@@ -9,33 +9,33 @@
         "serveValue" : true,
         "ruleName" : "US Pro users",
         "conditions" : [ {
+          "values" : [ "US" ],
           "attribute" : "country",
-          "operator" : "EQUALS",
-          "values" : [ "US" ]
+          "operator" : "EQUALS"
         }, {
+          "values" : [ "pro", "enterprise" ],
           "attribute" : "plan",
-          "operator" : "IN",
-          "values" : [ "pro", "enterprise" ]
+          "operator" : "IN"
         }, {
+          "values" : [ "guest", "trial" ],
           "attribute" : "role",
-          "operator" : "NOT_IN",
-          "values" : [ "guest", "trial" ]
+          "operator" : "NOT_IN"
         } ]
       }, {
         "serveValue" : true,
         "ruleName" : "EU beta users",
         "conditions" : [ {
+          "values" : [ "DE", "FR", "UK" ],
           "attribute" : "country",
-          "operator" : "IN",
-          "values" : [ "DE", "FR", "UK" ]
+          "operator" : "IN"
         }, {
+          "values" : [ "true" ],
           "attribute" : "beta_tester",
-          "operator" : "EQUALS",
-          "values" : [ "true" ]
+          "operator" : "EQUALS"
         }, {
+          "values" : [ "10" ],
           "attribute" : "eval_count",
-          "operator" : "GREATER_THAN",
-          "values" : [ "10" ]
+          "operator" : "GREATER_THAN"
         } ]
       } ]
     }
