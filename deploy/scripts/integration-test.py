@@ -118,7 +118,7 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Feature Management Service Integration Test",
         usage="%(prog)s [--admin URL] [--eval URL] [--ingest URL] [--worker URL] [--cdn URL] [--wait SEC]\n"
-              "       %(prog)s [admin_url] [eval_url] [ingest_url] [worker_url] [cdn_url] [wait_sec] (positional compat)")
+              "       %(prog)s [admin_url] [eval_url] [ingest_url] [worker_url] [cdn_url] [wait_sec]")
     # Named args (preferred)
     p.add_argument("--admin", default=None)
     p.add_argument("--eval", default=None)
@@ -127,16 +127,16 @@ def parse_args():
     p.add_argument("--cdn", default=None)
     p.add_argument("--wait", type=int, default=None)
     p.add_argument("--cdn-root", default=None, help="CDN root directory on disk")
-    # Positional args (backward compat with old bash script)
+    # Positional args (backward compat)
     p.add_argument("pos_admin", nargs="?", default=None)
     p.add_argument("pos_eval", nargs="?", default=None)
     p.add_argument("pos_ingest", nargs="?", default=None)
     p.add_argument("pos_worker", nargs="?", default=None)
-    p.add_argument("pos_cdn", nargs="?", default=None)
-    p.add_argument("pos_wait", nargs="?", type=int, default=None)
+    p.add_argument("pos_wait_or_cdn", nargs="?", default=None)
+    p.add_argument("pos_extra", nargs="*", default=None)
     args = p.parse_args()
 
-    # Positional args take precedence when named args are not given
+    # Positional-to-named mapping
     if args.admin is None:
         args.admin = args.pos_admin or "http://localhost:8080"
     if args.eval is None:
@@ -145,10 +145,26 @@ def parse_args():
         args.ingest = args.pos_ingest or "http://localhost:8082"
     if args.worker is None:
         args.worker = args.pos_worker or "http://localhost:8083"
-    if args.cdn is None:
-        args.cdn = args.pos_cdn or "http://localhost:8084"
+
+    # The 5th positional could be CDN_URL or WAIT:
+    #   Old CI (4 URLs + 1 num) : python test.py A E I W 5
+    #   New (5 URLs + optional) : python test.py A E I W C 5
+    raw = args.pos_wait_or_cdn
+    if raw is not None:
+        if raw.isdigit():
+            # Old CI: 4 URLs + wait_sec
+            args.wait = int(raw)
+            args.cdn = "http://localhost:8084"
+        else:
+            # New: CDN URL provided, wait may be in pos_extra
+            args.cdn = raw
+            if args.pos_extra and args.pos_extra[0].isdigit():
+                args.wait = int(args.pos_extra[0])
+    else:
+        args.cdn = "http://localhost:8084"
+
     if args.wait is None:
-        args.wait = args.pos_wait or 3
+        args.wait = 3
 
     return args
 
