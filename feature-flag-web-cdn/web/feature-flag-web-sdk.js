@@ -144,7 +144,7 @@
 
         let rulesPayload;
         try {
-            const resp = await fetch(rulesUrl);
+            const resp = await fetch(rulesUrl, { cache: 'force-cache' });
             if (!resp.ok) {
                 throw new Error('Rules fetch failed: HTTP ' + resp.status);
             }
