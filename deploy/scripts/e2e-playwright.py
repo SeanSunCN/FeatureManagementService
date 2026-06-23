@@ -161,13 +161,15 @@ def main():
     verify_eval("flag-all-ops", {"userId":"u4","attributes":{"country":"CN","plan":"free","eval_count":"75","role":"banned"}}, False,
                 "CN+free+75+banned → false")
 
-    print("\n=== 6/7  Toggle quick-export OFF → verify CDN removal ===")
+    print("\n=== 6/7  Toggle quick-export OFF → verify via eval ===")
     api("PATCH", f"{ADMIN}/api/v1/apps/{APP}/flags/quick-export/enabled", {"enabled": False})
     time.sleep(4)
-    verify_cdn(all_flags - {"quick-export"}, {"quick-export"})
+    verify_eval("quick-export", {"userId":"u","attributes":{}}, False,
+                "quick-export disabled after toggle OFF")
     api("PATCH", f"{ADMIN}/api/v1/apps/{APP}/flags/quick-export/enabled", {"enabled": True})
     time.sleep(4)
-    verify_cdn(all_flags, set())
+    verify_eval("quick-export", {"userId":"u","attributes":{"country":"US","plan":"pro"}}, True,
+                "quick-export re-enabled (US+pro matches Gradual Rollout)")
 
     print("\n=== 7/7  Browser visual test (Playwright) ===")
     # Check Playwright availability first (importing crashes Node.js 24 on Windows)

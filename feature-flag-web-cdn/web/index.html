@@ -606,7 +606,11 @@
             if (window.performance && performance.clearResourceTimings)
                 performance.clearResourceTimings();
 
-            await FeatureFlagSDK.initSdk(CDN_BASE);
+            await FeatureFlagSDK.initSdk(CDN_BASE, {
+                ingestUrl: 'http://localhost:8082/api/v1/ingest/metrics',
+                appId: 'demo-app',
+                metricsFlushIntervalMs: 5000,
+            });
             subtitle.textContent = '✓ SDK ready — ' + FeatureFlagSDK.getDiagnostics().flagCount + ' flags loaded';
             refreshBtn.disabled = false;
             renderAll();
