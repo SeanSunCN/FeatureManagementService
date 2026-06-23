@@ -106,7 +106,10 @@
       "Bash(python3 *)",
       "PowerShell(python -m playwright install chromium 2>&1 | Select-Object -Last 5)",
       "PowerShell(python -c \"from playwright.sync_api import sync_playwright; print\\('import OK'\\)\" 2>&1)",
-      "PowerShell(python -m playwright install --dry-run chromium 2>&1)"
+      "PowerShell(python -m playwright install --dry-run chromium 2>&1)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   }
 }

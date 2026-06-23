@@ -255,11 +255,9 @@
 
         /* ======== Bottom bar ======== */
         .bottom-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
             margin-top: 8px;
             padding: 16px 0;
         }
@@ -281,7 +279,8 @@
         .controls {
             display: flex;
             gap: 8px;
-            flex-wrap: wrap;
+            justify-content: flex-end;
+            align-items: center;
         }
         .btn {
             padding: 10px 24px;
@@ -407,6 +406,7 @@
                 <dt>Flags Cache:</dt><dd id="ddFlagCount">—</dd>
                 <dt>Manifest Ver:</dt><dd id="ddVersion">—</dd>
                 <dt>Cache Hit:</dt><dd id="ddCache">—</dd>
+                <dt>Last Update:</dt><dd id="ddUpdated">—</dd>
             </dl>
         </div>
         <div class="controls">
@@ -591,6 +591,7 @@
         ddVersion.textContent = String(diag.version);
         ddCache.textContent = diag.fromCache ? '✅ DISK CACHE' : '⚠ NETWORK';
         ddCache.className = diag.fromCache ? 'cache-hit' : 'cache-miss';
+        document.getElementById('ddUpdated').textContent = diag.updatedAt || 'N/A';
         document.getElementById('sdkLoaded').textContent = 'true';
     }
 

@@ -47,6 +47,9 @@
     let manifestVersion = 0;
 
     /** @type {string} */
+    let manifestUpdatedAt = '';
+
+    /** @type {string} */
     let baseCdnUrl = '';
 
     /** @type {{fromCache: boolean, transferSize: number, duration: number}} */
@@ -131,6 +134,7 @@
         }
 
         manifestVersion = manifest.version || 0;
+        manifestUpdatedAt = manifest.updated_at || '';
 
         // ---- Step 2: Fetch rules file (STRONG CACHE) ----
         const rulesUrl = baseCdnUrl + '/' + manifest.latest_file;
@@ -447,6 +451,7 @@
             duration: Math.round(lastFetchDiagnostics.duration * 100) / 100,
             version: manifestVersion,
             flagCount: flagMap ? flagMap.size : 0,
+            updatedAt: manifestUpdatedAt,
         };
     }
 
