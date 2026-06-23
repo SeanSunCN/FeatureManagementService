@@ -141,6 +141,7 @@ services:
       - "8084:80"
     volumes:
       - ../../feature-flag-web-cdn/cdn_root:/usr/share/nginx/html:ro
+      - ../../feature-flag-web-cdn/web:/usr/share/nginx/web:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - flag_net
