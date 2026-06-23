@@ -34,6 +34,11 @@ echo ""
 echo "[1/5] Pulling latest code..."
 git fetch origin main
 git checkout main
+
+# Discard any local changes (generated CDN files, SCP'd test script)
+# that would conflict with the pull. These are never committed changes.
+git checkout -- . 2>/dev/null || true
+
 git pull origin main
 
 CURRENT_COMMIT=$(git rev-parse --short HEAD)
