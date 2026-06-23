@@ -2,20 +2,35 @@
  * feature-flag-web-sdk.js — Ultra-lightweight client-side Feature Flag SDK
  *
  * Architecture:
- *   Manifest + Cache Busting + Pure In-Memory Evaluation
+ *   Manifest + Cache Busting + Pure In-Memory Evaluation + Periodic Telemetry
  *
- * 1. initSdk(cdnUrl)
+ * 1. initSdk(cdnUrl, options)
  *    - Fetches manifest.json with ?t=Date.now() to crush all caches
  *    - Resolves the latest_file URL
  *    - Fetches the versioned rules file (which hits browser Disk Cache)
  *    - Parses rules into an in-memory Map for O(1) lookup
+ *    - If options.ingestUrl is set, starts periodic metrics flush
  *
  * 2. isEnabled(flagKey, context)
  *    - Pure local evaluation — 0ms, no network call
  *    - Supports: global toggle, default serve value, rule conditions
- *    - Condition operators: EQUALS, NOT_EQUALS, IN, NOT_IN
+ *    - Condition operators: EQUALS, NOT_EQUALS, IN, NOT_IN, GREATER_THAN, LESS_THAN
+ *    - Records a hit counter atomically (no blocking)
  *
- * (c) 2026 — Zero external dependencies, < 4KB gzipped
+ * 3. getDiagnostics()
+ *    - Returns cache-hit info, version, flag count
+ *
+ * 4. stopAutoRefresh()
+ *    - Clears the periodic rule-refresh timer (legacy)
+ *    - Triggers one final metrics flush
+ *
+ * Telemetry (aligns with Java LightFlagClient / HeavyMetricsAggregator):
+ *   - flagHitCounts: plain object keyed by flagKey, values are integers
+ *   - flushed every metricsFlushIntervalMs via POST to ingestUrl
+ *   - on page hide/unload: sendBeacon for guaranteed delivery
+ *   - all errors silently caught
+ *
+ * (c) 2026 — Zero external dependencies
  */
 
 (function (global) {
@@ -34,13 +49,31 @@
     /** @type {string} */
     let baseCdnUrl = '';
 
-    /**
-     * Track whether the last rules fetch hit the network or Disk Cache.
-     * We inspect performance entries (Resource Timing API) to detect this.
-     *
-     * @type {{fromCache: boolean, transferSize: number, duration: number}}
-     */
+    /** @type {{fromCache: boolean, transferSize: number, duration: number}} */
     let lastFetchDiagnostics = { fromCache: false, transferSize: -1, duration: -1 };
+
+    // ---- Telemetry state ----
+
+    /**
+     * Hit counters: { [flagKey]: number }
+     * Aligns with Java's ConcurrentHashMap<String, AtomicLong>
+     */
+    let flagHitCounts = {};
+
+    /** @type {?Object} */
+    let telemetryOptions = null;
+
+    /** @type {?number} */
+    let metricsTimerId = null;
+
+    /** @type {?function} */
+    let onVisibilityChange = null;
+
+    /** @type {?function} */
+    let onPageHide = null;
+
+    /** @type {?function} */
+    let onBeforeUnload = null;
 
     // ==================================================================
     //  Initialisation
@@ -48,18 +81,34 @@
 
     /**
      * Initialise the SDK: fetch manifest (always fresh), then fetch rules
-     * (likely from Disk Cache).
+     * (likely from Disk Cache). Optionally start telemetry.
      *
-     * @param {string} cdnUrl  Base URL of the CDN, e.g. "http://localhost:8080"
+     * @param {string} cdnUrl          Base URL of the CDN, e.g. "http://localhost:8080"
+     * @param {Object} [options]       Optional configuration
+     * @param {number} [options.intervalMs=300000]        Rule refresh interval (ms)
+     * @param {boolean}[options.refreshOnVisibility=true] Auto-refresh on tab visible
+     * @param {string} [options.ingestUrl='']             Metrics POST endpoint
+     * @param {number} [options.metricsFlushIntervalMs=5000]  Metrics flush period (ms)
+     * @param {string} [options.appId='web-client']       App ID for metrics payload
      * @returns {Promise<void>}
      */
-    async function initSdk(cdnUrl) {
+    async function initSdk(cdnUrl, options) {
         if (!cdnUrl || typeof cdnUrl !== 'string') {
             throw new Error('initSdk: cdnUrl must be a non-empty string');
         }
 
         // Normalise: strip trailing slash
         baseCdnUrl = cdnUrl.replace(/\/+$/, '');
+
+        // Merge options with defaults
+        const opts = options || {};
+        telemetryOptions = {
+            intervalMs: opts.intervalMs !== undefined ? opts.intervalMs : 300000,
+            refreshOnVisibility: opts.refreshOnVisibility !== undefined ? opts.refreshOnVisibility : true,
+            ingestUrl: opts.ingestUrl || '',
+            metricsFlushIntervalMs: opts.metricsFlushIntervalMs !== undefined ? opts.metricsFlushIntervalMs : 5000,
+            appId: opts.appId || 'web-client',
+        };
 
         // ---- Step 1: Fetch manifest (CACHE BUSTING via ?t=) ----
         const manifestUrl = baseCdnUrl + '/manifest.json?t=' + Date.now();
@@ -83,14 +132,10 @@
 
         manifestVersion = manifest.version || 0;
 
-        // ---- Step 2: Fetch rules file (STRONG CACHE — likely Disk Cache hit) ----
-        // Note: NO cache buster here — the URL is versioned (rules.1002.json)
-        // and Nginx returns Cache-Control: public, immutable, max-age=31536000.
-        // The browser will serve this from Disk Cache on repeat visits.
+        // ---- Step 2: Fetch rules file (STRONG CACHE) ----
         const rulesUrl = baseCdnUrl + '/' + manifest.latest_file;
         console.log('[FF-SDK] Fetching rules:', rulesUrl);
 
-        // Record pre-fetch timestamps for cache diagnostics
         const fetchStart = performance.now();
 
         let rulesPayload;
@@ -101,15 +146,12 @@
             }
             rulesPayload = await resp.json();
 
-            // Capture diagnostics AFTER the response
             lastFetchDiagnostics.duration = performance.now() - fetchStart;
 
-            // Use Resource Timing API to detect cache hit
             const entries = performance.getEntriesByName(rulesUrl);
             if (entries.length > 0) {
                 const last = entries[entries.length - 1];
                 lastFetchDiagnostics.transferSize = last.transferSize;
-                // transferSize === 0 means served from cache (Disk Cache or Memory Cache)
                 lastFetchDiagnostics.fromCache = last.transferSize === 0;
             }
 
@@ -128,6 +170,136 @@
             ', flags=' + flagMap.size +
             ', cache=' + (lastFetchDiagnostics.fromCache ? 'DISK-CACHE' : 'NETWORK') +
             ', transferSize=' + lastFetchDiagnostics.transferSize + 'B');
+
+        // ---- Step 4: Start telemetry if ingestUrl is configured ----
+        startTelemetry();
+    }
+
+    // ==================================================================
+    //  Telemetry: Local Counter Batching & Flush
+    //  Aligns with Java LightFlagClient / HeavyMetricsAggregator
+    // ==================================================================
+
+    /**
+     * Start periodic metrics flush + lifecycle listeners.
+     * Safe to call multiple times (previous timers/listeners are cleaned).
+     */
+    function startTelemetry() {
+        if (!telemetryOptions || !telemetryOptions.ingestUrl) {
+            return; // Telemetry not configured
+        }
+
+        // Clean any previous telemetry session first
+        stopTelemetry();
+
+        // ---- Periodic timer flush (aligns with ScheduledExecutorService) ----
+        metricsTimerId = setInterval(flushMetrics, telemetryOptions.metricsFlushIntervalMs);
+
+        // ---- Visibility change: flush on hide (aligns with shutdown hook) ----
+        onVisibilityChange = function () {
+            if (document.visibilityState === 'hidden') {
+                flushMetrics();
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        // ---- Page hide / unload: sendBeacon guarantees delivery ----
+        onPageHide = function () {
+            flushViaBeacon();
+        };
+        onBeforeUnload = function () {
+            flushViaBeacon();
+        };
+        global.addEventListener('pagehide', onPageHide);
+        global.addEventListener('beforeunload', onBeforeUnload);
+    }
+
+    /**
+     * Stop telemetry timers and remove listeners.
+     */
+    function stopTelemetry() {
+        if (metricsTimerId !== null) {
+            clearInterval(metricsTimerId);
+            metricsTimerId = null;
+        }
+        if (onVisibilityChange) {
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+            onVisibilityChange = null;
+        }
+        if (onPageHide) {
+            global.removeEventListener('pagehide', onPageHide);
+            onPageHide = null;
+        }
+        if (onBeforeUnload) {
+            global.removeEventListener('beforeunload', onBeforeUnload);
+            onBeforeUnload = null;
+        }
+    }
+
+    /**
+     * Snapshot and reset counters, then POST to ingestUrl.
+     * Atomic read-then-reset via object swap (aligns with getAndSet(0)).
+     */
+    function flushMetrics() {
+        // Atomically: snapshot current counters and reset
+        const snapshot = flagHitCounts;
+        flagHitCounts = {};
+
+        const keys = Object.keys(snapshot);
+        if (keys.length === 0) {
+            return; // Nothing to report
+        }
+
+        // Build payload matching MetricsReportRequest:
+        // { "appId": "...", "flagHitCounts": { "flag-a": 10, "flag-b": 5 } }
+        const payload = {
+            appId: telemetryOptions.appId,
+            flagHitCounts: snapshot,
+        };
+
+        // POST via fetch — errors silently swallowed (aligns with Java try-catch)
+        fetch(telemetryOptions.ingestUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }).catch(function () {
+            // Swallow — telemetry must never throw
+        });
+    }
+
+    /**
+     * Final flush using sendBeacon (guaranteed delivery on page close).
+     * Falls back to fetch with keepalive.
+     */
+    function flushViaBeacon() {
+        const snapshot = flagHitCounts;
+        flagHitCounts = {};
+
+        const keys = Object.keys(snapshot);
+        if (keys.length === 0) {
+            return;
+        }
+
+        const payload = {
+            appId: telemetryOptions.appId,
+            flagHitCounts: snapshot,
+        };
+
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon(telemetryOptions.ingestUrl, blob);
+        } else {
+            // Fallback: keepalive fetch
+            try {
+                fetch(telemetryOptions.ingestUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    keepalive: true,
+                }).catch(function () {});
+            } catch (_) {}
+        }
     }
 
     // ==================================================================
@@ -147,30 +319,40 @@
             return false;
         }
 
+        let result = false;
+
         const flag = flagMap.get(flagKey);
         if (!flag) {
             // Unknown flag → disabled by default
-            return false;
-        }
-
-        // Step 1: If global toggle is OFF, flag is always disabled
-        if (!flag.enabled) {
-            return false;
-        }
-
-        // Step 2: Evaluate rules (first match wins — OR semantics)
-        const rules = flag.rules;
-        if (rules && Array.isArray(rules) && rules.length > 0) {
-            const ctx = context || {};
-            for (const rule of rules) {
-                if (evaluateRule(rule, ctx)) {
-                    return rule.serveValue === true;
+            result = false;
+        } else if (!flag.enabled) {
+            // Global toggle is OFF
+            result = false;
+        } else {
+            // Evaluate rules (OR semantics — first match wins)
+            const rules = flag.rules;
+            if (rules && Array.isArray(rules) && rules.length > 0) {
+                const ctx = context || {};
+                for (const rule of rules) {
+                    if (evaluateRule(rule, ctx)) {
+                        result = rule.serveValue === true;
+                        break;
+                    }
                 }
+            }
+            // If no rule matched, fall through to defaultServeValue
+            if (result === false) {
+                result = flag.defaultServeValue === true;
             }
         }
 
-        // Step 3: No rule matched → use defaultServeValue
-        return flag.defaultServeValue === true;
+        // ---- Telemetry: count every evaluation where result is true ----
+        // Aligns with Java: hitCounts.computeIfAbsent(k -> new AtomicLong()).incrementAndGet()
+        if (result && telemetryOptions && telemetryOptions.ingestUrl) {
+            flagHitCounts[flagKey] = (flagHitCounts[flagKey] || 0) + 1;
+        }
+
+        return result;
     }
 
     // ==================================================================
@@ -211,14 +393,12 @@
      * @returns {boolean}
      */
     function evaluateCondition(cond, ctx) {
-        // Resolve the actual value from context
         let actualValue;
         if (cond.attribute === 'userId') {
             actualValue = ctx.userId;
         } else if (ctx.attributes && ctx.attributes.hasOwnProperty(cond.attribute)) {
             actualValue = ctx.attributes[cond.attribute];
         } else {
-            // Attribute not present in context → condition fails
             return false;
         }
 
@@ -232,14 +412,10 @@
 
         switch (op) {
             case 'EQUALS':
-                return values.some(v => String(v) === actualStr);
-
-            case 'NOT_EQUALS':
-                return !values.some(v => String(v) === actualStr);
-
             case 'IN':
                 return values.some(v => String(v) === actualStr);
 
+            case 'NOT_EQUALS':
             case 'NOT_IN':
                 return !values.some(v => String(v) === actualStr);
 
@@ -261,7 +437,6 @@
 
     /**
      * Return diagnostics from the last rules fetch.
-     * Useful for verifying cache-hit behaviour in the demo page.
      *
      * @returns {{ fromCache: boolean, transferSize: number, duration: number, version: number, flagCount: number }}
      */
@@ -275,6 +450,18 @@
         };
     }
 
+    /**
+     * Stop auto-refresh (legacy method name).
+     * Clears timers, removes listeners, forces one final metrics flush.
+     */
+    function stopAutoRefresh() {
+        // Final flush before teardown
+        if (telemetryOptions && telemetryOptions.ingestUrl) {
+            flushMetrics();
+        }
+        stopTelemetry();
+    }
+
     // ==================================================================
     //  Public API
     // ==================================================================
@@ -283,6 +470,7 @@
         initSdk,
         isEnabled,
         getDiagnostics,
+        stopAutoRefresh,
     };
 
 })(window);
