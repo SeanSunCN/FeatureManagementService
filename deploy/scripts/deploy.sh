@@ -95,7 +95,7 @@ if [ "$ALL_OK" = "true" ]; then
   echo " Status:   ALL HEALTHY ✓"
 else
   echo " Status:   SOME ISSUES ⚠ — check logs:"
-  echo "          docker compose -f deploy/docker/docker-compose.cloud.yml logs"
+  echo "          docker compose -f deploy/docker/docker-compose.yml logs"
 fi
 
 # Clean up dangling images
