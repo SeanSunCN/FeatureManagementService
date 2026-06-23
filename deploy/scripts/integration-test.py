@@ -184,7 +184,7 @@ def eval_get(b: dict, path: str) -> ApiResponse:
     return call_api("GET", api_url(b["eval"], path))
 
 
-def eval_post(b: dict, path: str, body: dict | list) -> ApiResponse:
+def eval_post(b: dict, path: str, body: dict) -> ApiResponse:
     return call_api("POST", api_url(b["eval"], path), json.dumps(body))
 
 
@@ -192,7 +192,7 @@ def cdn_get(b: dict, path: str) -> ApiResponse:
     return call_api("GET", api_url(b["cdn"], path))
 
 
-def ingest_post(b: dict, path: str, body: dict | list) -> ApiResponse:
+def ingest_post(b: dict, path: str, body: dict) -> ApiResponse:
     return call_api("POST", api_url(b["ingest"], path), json.dumps(body))
 
 
