@@ -42,7 +42,7 @@ public class RuleCompiler {
     private static final String RULES_PREFIX = "rules.";
     private static final String RULES_SUFFIX = ".json";
 
-    private final AtomicInteger versionCounter = new AtomicInteger(1);
+    private final AtomicInteger versionCounter;
     private final ObjectMapper mapper;
     private final Path cdnRoot;
 
@@ -60,7 +60,32 @@ public class RuleCompiler {
             throw new IllegalStateException("Cannot create CDN root: " + cdnRootPath, e);
         }
 
-        log.info("RuleCompiler initialized, CDN root: {}", cdnRoot.toAbsolutePath());
+        // Initialise version counter from existing rules files on disk,
+        // so admin-api restarts never reset the version.
+        this.versionCounter = new AtomicInteger(loadMaxVersion());
+
+        log.info("RuleCompiler initialized, CDN root: {}, version={}",
+                cdnRoot.toAbsolutePath(), versionCounter.get());
+    }
+
+    /**
+     * Read the version from the existing manifest.json on disk.
+     * Returns the next version (last_published + 1), or 1 if no manifest exists.
+     * This ensures admin-api restarts never reset the version counter.
+     */
+    private int loadMaxVersion() {
+        Path manifestPath = cdnRoot.resolve(MANIFEST_FILE);
+        if (Files.exists(manifestPath)) {
+            try {
+                String content = Files.readString(manifestPath);
+                com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(content);
+                int lastVersion = node.path("version").asInt(0);
+                return lastVersion + 1;
+            } catch (IOException e) {
+                log.warn("Could not read existing manifest.json: {}", e.getMessage());
+            }
+        }
+        return 1;
     }
 
     /**
