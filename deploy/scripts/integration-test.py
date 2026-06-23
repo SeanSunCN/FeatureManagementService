@@ -115,15 +115,42 @@ def call_api(method: str, url: str, body: Optional[str] = None) -> ApiResponse:
 # ============================================================
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Feature Management Service Integration Test")
-    p.add_argument("--admin", default="http://localhost:8080")
-    p.add_argument("--eval", default="http://localhost:8081")
-    p.add_argument("--ingest", default="http://localhost:8082")
-    p.add_argument("--worker", default="http://localhost:8083")
-    p.add_argument("--cdn", default="http://localhost:8084")
-    p.add_argument("--wait", type=int, default=3)
+    p = argparse.ArgumentParser(
+        description="Feature Management Service Integration Test",
+        usage="%(prog)s [--admin URL] [--eval URL] [--ingest URL] [--worker URL] [--cdn URL] [--wait SEC]\n"
+              "       %(prog)s [admin_url] [eval_url] [ingest_url] [worker_url] [cdn_url] [wait_sec] (positional compat)")
+    # Named args (preferred)
+    p.add_argument("--admin", default=None)
+    p.add_argument("--eval", default=None)
+    p.add_argument("--ingest", default=None)
+    p.add_argument("--worker", default=None)
+    p.add_argument("--cdn", default=None)
+    p.add_argument("--wait", type=int, default=None)
     p.add_argument("--cdn-root", default=None, help="CDN root directory on disk")
-    return p.parse_args()
+    # Positional args (backward compat with old bash script)
+    p.add_argument("pos_admin", nargs="?", default=None)
+    p.add_argument("pos_eval", nargs="?", default=None)
+    p.add_argument("pos_ingest", nargs="?", default=None)
+    p.add_argument("pos_worker", nargs="?", default=None)
+    p.add_argument("pos_cdn", nargs="?", default=None)
+    p.add_argument("pos_wait", nargs="?", type=int, default=None)
+    args = p.parse_args()
+
+    # Positional args take precedence when named args are not given
+    if args.admin is None:
+        args.admin = args.pos_admin or "http://localhost:8080"
+    if args.eval is None:
+        args.eval = args.pos_eval or "http://localhost:8081"
+    if args.ingest is None:
+        args.ingest = args.pos_ingest or "http://localhost:8082"
+    if args.worker is None:
+        args.worker = args.pos_worker or "http://localhost:8083"
+    if args.cdn is None:
+        args.cdn = args.pos_cdn or "http://localhost:8084"
+    if args.wait is None:
+        args.wait = args.pos_wait or 3
+
+    return args
 
 
 # ============================================================
