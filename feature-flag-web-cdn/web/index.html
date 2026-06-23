@@ -435,11 +435,11 @@
 
     const CDN_BASE = 'http://localhost:8084';
     const PROFILES = {
-        'us-pro': { userId: 'demo-user', attributes: { plan: 'pro', country: 'US',
+        'us-pro': { appId: 'demo-app', userId: 'demo-user', attributes: { plan: 'pro', country: 'US',
             beta_tester: 'false', eval_count: '150', role: 'admin' } },
-        'eu-beta': { userId: 'beta-user', attributes: { plan: 'pro', country: 'DE',
+        'eu-beta': { appId: 'demo-app', userId: 'beta-user', attributes: { plan: 'pro', country: 'DE',
             beta_tester: 'true', eval_count: '30', role: 'member' } },
-        'cn-free': { userId: 'guest-user', attributes: { plan: 'free', country: 'CN',
+        'cn-free': { appId: 'demo-app', userId: 'guest-user', attributes: { plan: 'free', country: 'CN',
             beta_tester: 'false', eval_count: '5', role: 'guest' } },
     };
     function getCtx() {
@@ -608,7 +608,6 @@
 
             await FeatureFlagSDK.initSdk(CDN_BASE, {
                 ingestUrl: 'http://localhost:8082/api/v1/ingest/metrics',
-                appId: 'demo-app',
                 metricsFlushIntervalMs: 5000,
             });
             subtitle.textContent = '✓ SDK ready — ' + FeatureFlagSDK.getDiagnostics().flagCount + ' flags loaded';

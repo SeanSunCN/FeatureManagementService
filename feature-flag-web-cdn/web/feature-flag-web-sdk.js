@@ -6,26 +6,21 @@
  *
  * 1. initSdk(cdnUrl, options)
  *    - Fetches manifest.json with ?t=Date.now() to crush all caches
- *    - Resolves the latest_file URL
  *    - Fetches the versioned rules file (which hits browser Disk Cache)
  *    - Parses rules into an in-memory Map for O(1) lookup
  *    - If options.ingestUrl is set, starts periodic metrics flush
  *
  * 2. isEnabled(flagKey, context)
  *    - Pure local evaluation — 0ms, no network call
- *    - Supports: global toggle, default serve value, rule conditions
- *    - Condition operators: EQUALS, NOT_EQUALS, IN, NOT_IN, GREATER_THAN, LESS_THAN
- *    - Records a hit counter atomically (no blocking)
+ *    - context.appId is used for telemetry (SDK is stateless)
+ *    - Records a hit counter per (appId, flagKey)
  *
  * 3. getDiagnostics()
- *    - Returns cache-hit info, version, flag count
  *
  * 4. stopAutoRefresh()
- *    - Clears the periodic rule-refresh timer (legacy)
- *    - Triggers one final metrics flush
  *
- * Telemetry (aligns with Java LightFlagClient / HeavyMetricsAggregator):
- *   - flagHitCounts: plain object keyed by flagKey, values are integers
+ * Telemetry (aligns with Java LightFlagClient):
+ *   - flagHitCounts: { [appId]: { [flagKey]: count } }
  *   - flushed every metricsFlushIntervalMs via POST to ingestUrl
  *   - on page hide/unload: sendBeacon for guaranteed delivery
  *   - all errors silently caught
@@ -58,8 +53,8 @@
     // ---- Telemetry state ----
 
     /**
-     * Hit counters: { [flagKey]: number }
-     * Aligns with Java's ConcurrentHashMap<String, AtomicLong>
+     * Hit counters keyed by (appId, flagKey):
+     *   { [appId]: { [flagKey]: number } }
      */
     let flagHitCounts = {};
 
@@ -83,16 +78,15 @@
     // ==================================================================
 
     /**
-     * Initialise the SDK: fetch manifest (always fresh), then fetch rules
-     * (likely from Disk Cache). Optionally start telemetry.
+     * Initialise the SDK: fetch manifest (always fresh), then fetch rules.
      *
-     * @param {string} cdnUrl          Base URL of the CDN, e.g. "http://localhost:8080"
-     * @param {Object} [options]       Optional configuration
-     * @param {number} [options.intervalMs=300000]        Rule refresh interval (ms)
+     * @param {string} cdnUrl          Base URL of the CDN
+     * @param {Object} [options]
+     * @param {number} [options.intervalMs=300000]        Rule refresh interval
      * @param {boolean}[options.refreshOnVisibility=true] Auto-refresh on tab visible
      * @param {string} [options.ingestUrl='']             Metrics POST endpoint
-     * @param {number} [options.metricsFlushIntervalMs=5000]  Metrics flush period (ms)
-     * @param {string} [options.appId='web-client']       App ID for metrics payload
+     * @param {number} [options.metricsFlushIntervalMs=5000]  Flush period
+     * @param {string} [options.appId='default-app']       Fallback appId when context lacks it
      * @returns {Promise<void>}
      */
     async function initSdk(cdnUrl, options) {
@@ -100,17 +94,15 @@
             throw new Error('initSdk: cdnUrl must be a non-empty string');
         }
 
-        // Normalise: strip trailing slash
         baseCdnUrl = cdnUrl.replace(/\/+$/, '');
 
-        // Merge options with defaults
         const opts = options || {};
         telemetryOptions = {
             intervalMs: opts.intervalMs !== undefined ? opts.intervalMs : 300000,
             refreshOnVisibility: opts.refreshOnVisibility !== undefined ? opts.refreshOnVisibility : true,
             ingestUrl: opts.ingestUrl || '',
             metricsFlushIntervalMs: opts.metricsFlushIntervalMs !== undefined ? opts.metricsFlushIntervalMs : 5000,
-            appId: opts.appId || 'web-client',
+            appId: opts.appId || 'default-app',
         };
 
         // ---- Step 1: Fetch manifest (CACHE BUSTING via ?t=) ----
@@ -120,9 +112,7 @@
         let manifest;
         try {
             const resp = await fetch(manifestUrl, { cache: 'no-store' });
-            if (!resp.ok) {
-                throw new Error('Manifest fetch failed: HTTP ' + resp.status);
-            }
+            if (!resp.ok) throw new Error('Manifest fetch failed: HTTP ' + resp.status);
             manifest = await resp.json();
         } catch (err) {
             console.error('[FF-SDK] Failed to load manifest:', err.message);
@@ -145,9 +135,7 @@
         let rulesPayload;
         try {
             const resp = await fetch(rulesUrl, { cache: 'force-cache' });
-            if (!resp.ok) {
-                throw new Error('Rules fetch failed: HTTP ' + resp.status);
-            }
+            if (!resp.ok) throw new Error('Rules fetch failed: HTTP ' + resp.status);
             rulesPayload = await resp.json();
 
             lastFetchDiagnostics.duration = performance.now() - fetchStart;
@@ -158,13 +146,11 @@
                 lastFetchDiagnostics.transferSize = last.transferSize;
                 lastFetchDiagnostics.fromCache = last.transferSize === 0;
             }
-
         } catch (err) {
             console.error('[FF-SDK] Failed to load rules:', err.message);
             throw err;
         }
 
-        // ---- Step 3: Parse into in-memory map ----
         if (!rulesPayload.flags || typeof rulesPayload.flags !== 'object') {
             throw new Error('Rules payload missing "flags" object');
         }
@@ -172,137 +158,99 @@
         flagMap = new Map(Object.entries(rulesPayload.flags));
         console.log('[FF-SDK] Initialised: version=' + manifestVersion +
             ', flags=' + flagMap.size +
-            ', cache=' + (lastFetchDiagnostics.fromCache ? 'DISK-CACHE' : 'NETWORK') +
-            ', transferSize=' + lastFetchDiagnostics.transferSize + 'B');
+            ', cache=' + (lastFetchDiagnostics.fromCache ? 'DISK-CACHE' : 'NETWORK'));
 
-        // ---- Step 4: Start telemetry if ingestUrl is configured ----
+        // ---- Step 3: Start telemetry ----
         startTelemetry();
     }
 
     // ==================================================================
     //  Telemetry: Local Counter Batching & Flush
-    //  Aligns with Java LightFlagClient / HeavyMetricsAggregator
     // ==================================================================
 
-    /**
-     * Start periodic metrics flush + lifecycle listeners.
-     * Safe to call multiple times (previous timers/listeners are cleaned).
-     */
     function startTelemetry() {
-        if (!telemetryOptions || !telemetryOptions.ingestUrl) {
-            return; // Telemetry not configured
-        }
+        if (!telemetryOptions || !telemetryOptions.ingestUrl) return;
 
-        // Clean any previous telemetry session first
         stopTelemetry();
 
-        // ---- Periodic timer flush (aligns with ScheduledExecutorService) ----
         metricsTimerId = setInterval(flushMetrics, telemetryOptions.metricsFlushIntervalMs);
 
-        // ---- Visibility change: flush on hide (aligns with shutdown hook) ----
         onVisibilityChange = function () {
-            if (document.visibilityState === 'hidden') {
-                flushMetrics();
-            }
+            if (document.visibilityState === 'hidden') flushMetrics();
         };
         document.addEventListener('visibilitychange', onVisibilityChange);
 
-        // ---- Page hide / unload: sendBeacon guarantees delivery ----
-        onPageHide = function () {
-            flushViaBeacon();
-        };
-        onBeforeUnload = function () {
-            flushViaBeacon();
-        };
+        onPageHide = function () { flushViaBeacon(); };
+        onBeforeUnload = function () { flushViaBeacon(); };
         global.addEventListener('pagehide', onPageHide);
         global.addEventListener('beforeunload', onBeforeUnload);
     }
 
-    /**
-     * Stop telemetry timers and remove listeners.
-     */
     function stopTelemetry() {
-        if (metricsTimerId !== null) {
-            clearInterval(metricsTimerId);
-            metricsTimerId = null;
-        }
-        if (onVisibilityChange) {
-            document.removeEventListener('visibilitychange', onVisibilityChange);
-            onVisibilityChange = null;
-        }
-        if (onPageHide) {
-            global.removeEventListener('pagehide', onPageHide);
-            onPageHide = null;
-        }
-        if (onBeforeUnload) {
-            global.removeEventListener('beforeunload', onBeforeUnload);
-            onBeforeUnload = null;
-        }
+        if (metricsTimerId !== null) { clearInterval(metricsTimerId); metricsTimerId = null; }
+        if (onVisibilityChange) { document.removeEventListener('visibilitychange', onVisibilityChange); onVisibilityChange = null; }
+        if (onPageHide) { global.removeEventListener('pagehide', onPageHide); onPageHide = null; }
+        if (onBeforeUnload) { global.removeEventListener('beforeunload', onBeforeUnload); onBeforeUnload = null; }
     }
 
     /**
-     * Snapshot and reset counters, then POST to ingestUrl.
-     * Atomic read-then-reset via object swap (aligns with getAndSet(0)).
+     * Snapshot and reset all counters, POST one request per appId.
      */
     function flushMetrics() {
-        // Atomically: snapshot current counters and reset
         const snapshot = flagHitCounts;
         flagHitCounts = {};
 
-        const keys = Object.keys(snapshot);
-        if (keys.length === 0) {
-            return; // Nothing to report
+        const appIds = Object.keys(snapshot);
+        if (appIds.length === 0) return;
+
+        for (const appId of appIds) {
+            const counts = snapshot[appId];
+            const keys = Object.keys(counts);
+            if (keys.length === 0) continue;
+
+            const payload = { appId: appId, flagHitCounts: {} };
+            for (const k of keys) {
+                if (counts[k] > 0) payload.flagHitCounts[k] = counts[k];
+            }
+
+            fetch(telemetryOptions.ingestUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }).catch(function () {});
         }
-
-        // Build payload matching MetricsReportRequest:
-        // { "appId": "...", "flagHitCounts": { "flag-a": 10, "flag-b": 5 } }
-        const payload = {
-            appId: telemetryOptions.appId,
-            flagHitCounts: snapshot,
-        };
-
-        // POST via fetch — errors silently swallowed (aligns with Java try-catch)
-        fetch(telemetryOptions.ingestUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        }).catch(function () {
-            // Swallow — telemetry must never throw
-        });
     }
 
-    /**
-     * Final flush using sendBeacon (guaranteed delivery on page close).
-     * Falls back to fetch with keepalive.
-     */
     function flushViaBeacon() {
         const snapshot = flagHitCounts;
         flagHitCounts = {};
 
-        const keys = Object.keys(snapshot);
-        if (keys.length === 0) {
-            return;
-        }
+        const appIds = Object.keys(snapshot);
+        if (appIds.length === 0) return;
 
-        const payload = {
-            appId: telemetryOptions.appId,
-            flagHitCounts: snapshot,
-        };
+        for (const appId of appIds) {
+            const counts = snapshot[appId];
+            const keys = Object.keys(counts);
+            if (keys.length === 0) continue;
 
-        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            const payload = { appId: appId, flagHitCounts: {} };
+            for (const k of keys) {
+                if (counts[k] > 0) payload.flagHitCounts[k] = counts[k];
+            }
 
-        if (navigator.sendBeacon) {
-            navigator.sendBeacon(telemetryOptions.ingestUrl, blob);
-        } else {
-            // Fallback: keepalive fetch
-            try {
-                fetch(telemetryOptions.ingestUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                    keepalive: true,
-                }).catch(function () {});
-            } catch (_) {}
+            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(telemetryOptions.ingestUrl, blob);
+            } else {
+                try {
+                    fetch(telemetryOptions.ingestUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        keepalive: true,
+                    }).catch(function () {});
+                } catch (_) {}
+            }
         }
     }
 
@@ -313,9 +261,9 @@
     /**
      * Evaluate a feature flag purely in-memory.
      *
-     * @param {string} flagKey   The feature flag key
-     * @param {Object} [context] Context object with userId, attributes, etc.
-     * @returns {boolean}        Whether the flag is enabled for this context
+     * @param {string} flagKey
+     * @param {Object} [context]  May include appId, userId, attributes
+     * @returns {boolean}
      */
     function isEnabled(flagKey, context) {
         if (!flagMap) {
@@ -323,17 +271,14 @@
             return false;
         }
 
-        let result = false;
-
         const flag = flagMap.get(flagKey);
-        if (!flag) {
-            // Unknown flag → disabled by default
-            result = false;
-        } else if (!flag.enabled) {
-            // Global toggle is OFF
+        if (!flag) return false;
+
+        // Evaluate
+        let result = false;
+        if (!flag.enabled) {
             result = false;
         } else {
-            // Evaluate rules (OR semantics — first match wins)
             const rules = flag.rules;
             if (rules && Array.isArray(rules) && rules.length > 0) {
                 const ctx = context || {};
@@ -344,16 +289,16 @@
                     }
                 }
             }
-            // If no rule matched, fall through to defaultServeValue
             if (result === false) {
                 result = flag.defaultServeValue === true;
             }
         }
 
-        // ---- Telemetry: count every evaluation where result is true ----
-        // Aligns with Java: hitCounts.computeIfAbsent(k -> new AtomicLong()).incrementAndGet()
+        // ---- Telemetry: count enabled evaluations per (appId, flagKey) ----
         if (result && telemetryOptions && telemetryOptions.ingestUrl) {
-            flagHitCounts[flagKey] = (flagHitCounts[flagKey] || 0) + 1;
+            const appId = (context && context.appId) || telemetryOptions.appId;
+            if (!flagHitCounts[appId]) flagHitCounts[appId] = {};
+            flagHitCounts[appId][flagKey] = (flagHitCounts[appId][flagKey] || 0) + 1;
         }
 
         return result;
@@ -363,39 +308,15 @@
     //  Rule evaluation helpers
     // ==================================================================
 
-    /**
-     * Evaluate a single rule against the given context.
-     * A rule matches when ALL its conditions pass (AND logic).
-     *
-     * @param {Object} rule
-     * @param {Object} context
-     * @returns {boolean}
-     */
     function evaluateRule(rule, context) {
         const conditions = rule.conditions;
-        if (!conditions || !Array.isArray(conditions) || conditions.length === 0) {
-            // No conditions = always match
-            return true;
-        }
-
+        if (!conditions || !Array.isArray(conditions) || conditions.length === 0) return true;
         for (const cond of conditions) {
-            if (!evaluateCondition(cond, context)) {
-                return false;
-            }
+            if (!evaluateCondition(cond, context)) return false;
         }
         return true;
     }
 
-    /**
-     * Evaluate a single condition.
-     *
-     * Supported operators:
-     *   EQUALS, NOT_EQUALS, IN, NOT_IN, GREATER_THAN, LESS_THAN
-     *
-     * @param {Object} cond   { attribute, operator, values }
-     * @param {Object} ctx    { userId, attributes?: { key: val } }
-     * @returns {boolean}
-     */
     function evaluateCondition(cond, ctx) {
         let actualValue;
         if (cond.attribute === 'userId') {
@@ -405,30 +326,21 @@
         } else {
             return false;
         }
-
-        if (actualValue === undefined || actualValue === null) {
-            return false;
-        }
+        if (actualValue === undefined || actualValue === null) return false;
 
         const actualStr = String(actualValue);
         const op = cond.operator;
         const values = cond.values || [];
 
         switch (op) {
-            case 'EQUALS':
-            case 'IN':
+            case 'EQUALS': case 'IN':
                 return values.some(v => String(v) === actualStr);
-
-            case 'NOT_EQUALS':
-            case 'NOT_IN':
+            case 'NOT_EQUALS': case 'NOT_IN':
                 return !values.some(v => String(v) === actualStr);
-
             case 'GREATER_THAN':
                 return values.some(v => Number(actualValue) > Number(v));
-
             case 'LESS_THAN':
                 return values.some(v => Number(actualValue) < Number(v));
-
             default:
                 console.warn('[FF-SDK] Unknown operator:', op);
                 return false;
@@ -439,11 +351,6 @@
     //  Diagnostics / utilities
     // ==================================================================
 
-    /**
-     * Return diagnostics from the last rules fetch.
-     *
-     * @returns {{ fromCache: boolean, transferSize: number, duration: number, version: number, flagCount: number }}
-     */
     function getDiagnostics() {
         return {
             fromCache: lastFetchDiagnostics.fromCache,
@@ -455,15 +362,8 @@
         };
     }
 
-    /**
-     * Stop auto-refresh (legacy method name).
-     * Clears timers, removes listeners, forces one final metrics flush.
-     */
     function stopAutoRefresh() {
-        // Final flush before teardown
-        if (telemetryOptions && telemetryOptions.ingestUrl) {
-            flushMetrics();
-        }
+        if (telemetryOptions && telemetryOptions.ingestUrl) flushMetrics();
         stopTelemetry();
     }
 
