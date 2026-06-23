@@ -1,0 +1,191 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "11.1.0"},
+    {"type": "datasource", "id": "clickhouse", "name": "ClickHouse", "version": "4.18.0"}
+  ],
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "panels": [],
+      "title": "Row 1 - Macro Metrics (flag_hit_metrics)",
+      "type": "row"
+    },
+    {
+      "id": 2,
+      "title": "Evaluation Count per Flag (1m resolution)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+      "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "custom": {"displayMode": "table", "stacking": {"mode": "none"}}},
+        "overrides": []
+      },
+      "options": {
+        "legend": {"calcs": ["sum","max"], "displayMode": "table", "placement": "right"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "queryType": "sql",
+        "rawSql": "SELECT toUnixTimestamp(toStartOfMinute(recorded_at)) * 1000 AS time, flag_key AS metric, sum(eval_count) AS value FROM flag.flag_hit_metrics WHERE $__timeFilter(recorded_at) GROUP BY time, flag_key ORDER BY time ASC",
+        "refId": "A"
+      }],
+      "interval": "1m"
+    },
+    {
+      "id": 3,
+      "title": "True Hit Rate %",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+      "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+      "fieldConfig": {
+        "defaults": {"unit": "percent", "max": 100},
+        "overrides": []
+      },
+      "options": {
+        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "right"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "queryType": "sql",
+        "rawSql": "SELECT toUnixTimestamp(toStartOfMinute(recorded_at)) * 1000 AS time, flag_key AS metric, sum(hits) * 100.0 / nullIf(sum(eval_count), 0) AS value FROM flag.flag_hit_metrics WHERE $__timeFilter(recorded_at) GROUP BY time, flag_key ORDER BY time ASC",
+        "refId": "A"
+      }],
+      "interval": "1m"
+    },
+    {
+      "id": 4,
+      "title": "Top 10 Flags (last 1h)",
+      "type": "bargauge",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 9},
+      "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "color": {"mode": "continuous-GrYlRd"}},
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "minVizHeight": 200
+      },
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "queryType": "sql",
+        "rawSql": "SELECT flag_key AS metric, sum(eval_count) AS value FROM flag.flag_hit_metrics WHERE recorded_at >= now() - INTERVAL 1 HOUR GROUP BY flag_key ORDER BY value DESC LIMIT 10",
+        "refId": "A"
+      }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17},
+      "id": 5,
+      "panels": [],
+      "title": "Row 2 - Audit Logs (flag_audit_log)",
+      "type": "row"
+    },
+    {
+      "id": 6,
+      "title": "User Hit Trace",
+      "type": "table",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 18},
+      "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+      "fieldConfig": {
+        "defaults": {"custom": {"displayMode": "auto", "align": "left", "filterable": true}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "matched_rule"}, "properties": [{"id": "custom.displayMode", "value": "json-view"}]},
+          {"matcher": {"id": "byName", "options": "attributes_snapshot"}, "properties": [{"id": "custom.displayMode", "value": "json-view"}, {"id": "custom.width", "value": 300}]},
+          {"matcher": {"id": "byName", "options": "eval_cost_ms"}, "properties": [{"id": "unit", "value": "ms"}]},
+          {"matcher": {"id": "byName", "options": "enabled"}, "properties": [
+            {"id": "custom.displayMode", "value": "color-background"},
+            {"id": "color", "value": {"mode": "thresholds"}},
+            {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}
+          ]}
+        ]
+      },
+      "options": {
+        "footer": {"countRows": true, "enablePagination": true},
+        "showTypeIcons": false,
+        "sortBy": [{"desc": true, "displayName": "recorded_at"}]
+      },
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "queryType": "sql",
+        "rawSql": "SELECT recorded_at, flag_key, user_id, enabled, matched_rule, client_ip, eval_cost_ns / 1000000.0 AS eval_cost_ms, attributes_snapshot FROM flag.flag_audit_log WHERE $__timeFilter(recorded_at) ORDER BY recorded_at DESC LIMIT 100",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 7,
+      "title": "Eval Latency (ms)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+      "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+      "fieldConfig": {
+        "defaults": {"unit": "ms", "custom": {"displayMode": "table", "stacking": {"mode": "none"}}},
+        "overrides": []
+      },
+      "options": {
+        "legend": {"calcs": ["mean","max"], "displayMode": "table", "placement": "right"},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [{
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "queryType": "sql",
+        "rawSql": "SELECT toUnixTimestamp(toStartOfMinute(recorded_at)) * 1000 AS time, flag_key AS metric, avg(eval_cost_ns / 1000000.0) AS value FROM flag.flag_audit_log WHERE $__timeFilter(recorded_at) GROUP BY time, metric ORDER BY time ASC",
+        "refId": "A"
+      }]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["feature-flag", "clickhouse", "metrics"],
+  "templating": {
+    "list": [
+      {
+        "name": "app_id",
+        "type": "query",
+        "query": "SELECT DISTINCT app_id FROM flag.flag_hit_metrics ORDER BY app_id ASC",
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": "",
+        "multi": true,
+        "label": "App ID"
+      },
+      {
+        "name": "search_flag",
+        "type": "query",
+        "query": "SELECT DISTINCT flag_key FROM flag.flag_audit_log ORDER BY flag_key ASC",
+        "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": "",
+        "multi": false,
+        "label": "Search Flag Key"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+  },
+  "title": "Feature Flag Metrics Dashboard",
+  "uid": "flag-metrics-dashboard",
+  "version": 2,
+  "weekStart": ""
+}
