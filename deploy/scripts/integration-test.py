@@ -18,6 +18,7 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+from typing import Optional, Union
 
 # ============================================================
 #  Globals
@@ -95,7 +96,7 @@ class ApiResponse:
         return 200 <= self.status < 300
 
 
-def call_api(method: str, url: str, body: str | None = None) -> ApiResponse:
+def call_api(method: str, url: str, body: Optional[str] = None) -> ApiResponse:
     data = body.encode("utf-8") if body else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Content-Type", "application/json")
@@ -157,7 +158,7 @@ def eval_get(b: dict, path: str) -> ApiResponse:
     return call_api("GET", api_url(b["eval"], path))
 
 
-def eval_post(b: dict, path: str, body: dict | list) -> ApiResponse:
+def eval_post(b: dict, path: str, body: dict) -> ApiResponse:
     return call_api("POST", api_url(b["eval"], path), json.dumps(body))
 
 
@@ -165,7 +166,7 @@ def cdn_get(b: dict, path: str) -> ApiResponse:
     return call_api("GET", api_url(b["cdn"], path))
 
 
-def ingest_post(b: dict, path: str, body: dict | list) -> ApiResponse:
+def ingest_post(b: dict, path: str, body: dict) -> ApiResponse:
     return call_api("POST", api_url(b["ingest"], path), json.dumps(body))
 
 
@@ -232,7 +233,7 @@ def test_create_flags(b: dict):
         fail_msg("Verify 3 Flags", f"actual count={len(flags_list)}")
 
 
-def test_cdn_publish(b: dict, cdn_root: str | None, wait: int):
+def test_cdn_publish(b: dict, cdn_root: Optional[str], wait: int):
     header("4/10  CDN Publish (safe_for_client)")
 
     # Create client-safe flag
