@@ -37,7 +37,11 @@ def api(method, url, body=None):
                                  headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
-            return r.status, json.loads(r.read())
+            body = r.read()
+            try:
+                return r.status, json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                return r.status, {}
     except urllib.error.HTTPError as e:
         return e.code, {}
     except Exception as e:

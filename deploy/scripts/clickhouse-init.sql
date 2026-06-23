@@ -72,7 +72,7 @@ AS SELECT
     JSONExtractString(message, 'appId')              AS app_id,
     JSONExtractString(message, 'flagKey')            AS flag_key,
     JSONExtractString(message, 'userId')             AS user_id,
-    JSONExtractUInt(message, 'enabled')              AS enabled,
+    JSONExtractBool(message, 'enabled')              AS enabled,
     JSONExtractString(message, 'matchedRule')        AS matched_rule,
     JSONExtractString(message, 'clientIp')           AS client_ip,
     JSONExtractString(message, 'attributesSnapshot') AS attributes_snapshot,

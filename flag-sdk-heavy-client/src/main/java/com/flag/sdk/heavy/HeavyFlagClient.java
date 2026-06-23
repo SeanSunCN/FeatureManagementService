@@ -1,5 +1,6 @@
 package com.flag.sdk.heavy;
 
+import com.flag.common.dto.AuditLogEntry;
 import com.flag.common.dto.EvaluateRequest;
 import com.flag.common.dto.EvaluateResponse;
 import com.flag.sdk.FlagSdkClient;
@@ -85,6 +86,7 @@ public class HeavyFlagClient implements FlagSdkClient {
         });
 
         HeavyMetricsAggregator.register(appId, ingestServiceUrl);
+        HeavyAuditLogAggregator.register(appId, ingestServiceUrl);
     }
 
     // ========================================================================
@@ -150,15 +152,36 @@ public class HeavyFlagClient implements FlagSdkClient {
             log.warn("appId mismatch: client={}, requested={}", this.appId, appId);
         }
 
+        boolean enabled;
+        String matchedRule;
+        long evalCostNs;
+
         // 1. Local evaluation (lock-free)
         EvaluateResponse local = dataStore.evaluate(flagKey, userId, attributes);
         if (local != null) {
+            enabled = local.isEnabled();
+            matchedRule = local.getMatchedRuleName() != null ? local.getMatchedRuleName() : "local-eval";
+            evalCostNs = local.getEvalCostNs();
             HeavyMetricsAggregator.increment(appId, flagKey);
-            return local.isEnabled();
+        } else {
+            // 2. Cache miss → remote evaluation
+            enabled = remoteEvaluate(flagKey, userId, attributes);
+            matchedRule = "remote-eval";
+            evalCostNs = 0L;
         }
 
-        // 2. Cache miss → remote evaluation
-        return remoteEvaluate(flagKey, userId, attributes);
+        // Report audit log
+        AuditLogEntry entry = new AuditLogEntry();
+        entry.setAppId(appId);
+        entry.setFlagKey(flagKey);
+        entry.setUserId(userId != null ? userId : "");
+        entry.setEnabled(enabled);
+        entry.setMatchedRule(matchedRule);
+        entry.setEvalCostNs(evalCostNs);
+        entry.setAttributesSnapshot(attributes != null ? new HashMap<>(attributes) : new HashMap<>());
+        HeavyAuditLogAggregator.report(appId, entry);
+
+        return enabled;
     }
 
     @Override
@@ -223,8 +246,9 @@ public class HeavyFlagClient implements FlagSdkClient {
         // 1. Disconnect SSE (stops all incoming updates)
         sseStream.shutdownNow();
 
-        // 2. Flush remaining metrics
+        // 2. Flush remaining metrics and audit logs
         HeavyMetricsAggregator.flushAndDrain(appId);
+        HeavyAuditLogAggregator.flushAndDrain(appId);
 
         // 3. Clear local rules
         dataStore.clear();

@@ -7,6 +7,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import com.flag.common.dto.AuditLogEntry;
 import com.flag.common.dto.EvaluateRequest;
 import com.flag.common.dto.EvaluateResponse;
 import java.util.*;
@@ -59,10 +60,12 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
     // ============================================================
 
     private static final GlobalMetricsAggregator aggregator = new GlobalMetricsAggregator();
+    private static final GlobalAuditLogAggregator auditAggregator = new GlobalAuditLogAggregator();
 
     static {
         // JVM Shutdown Hook: ensures remaining counts are flushed on JVM exit
         Runtime.getRuntime().addShutdownHook(new Thread(aggregator::shutdown, "flag-metrics-shutdown-hook"));
+        Runtime.getRuntime().addShutdownHook(new Thread(auditAggregator::shutdown, "flag-audit-log-shutdown-hook"));
     }
 
     // ============================================================
@@ -94,6 +97,7 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
     public boolean isEnabled(String appId, String flagKey, String userId,
                              Map<String, String> attributes) {
         boolean result;
+        String responseBody = null;
         try {
             StringBuilder body = new StringBuilder(256);
             body.append("{\"appId\":\"").append(escapeJson(appId))
@@ -127,7 +131,8 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
                     HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 200 && response.body() != null) {
-                result = parseEnabled(response.body());
+                responseBody = response.body();
+                result = parseEnabled(responseBody);
             } else {
                 result = defaultResult;
             }
@@ -140,7 +145,36 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
             aggregator.increment(appId, flagKey);
         }
 
+        // Report audit log (batch accumulation)
+        // Build AuditLogEntry from the eval response and request params
+        reportAuditLog(appId, flagKey, userId, attributes, result, responseBody);
+
         return result;
+    }
+
+    /**
+     * Build and report an audit log entry for a single evaluation.
+     * Uses the HTTP response body if available (from remote eval), otherwise uses defaults.
+     */
+    private void reportAuditLog(String appId, String flagKey, String userId,
+                                 Map<String, String> attributes,
+                                 boolean enabled, String responseBody) {
+        AuditLogEntry entry = new AuditLogEntry();
+        entry.setAppId(appId);
+        entry.setFlagKey(flagKey);
+        entry.setUserId(userId != null ? userId : "");
+        entry.setEnabled(enabled);
+        entry.setAttributesSnapshot(attributes != null ? new HashMap<>(attributes) : new HashMap<>());
+
+        if (responseBody != null) {
+            entry.setMatchedRule(parseMatchedRule(responseBody));
+            entry.setEvalCostNs(parseEvalCostNs(responseBody));
+        } else {
+            entry.setMatchedRule("default");
+            entry.setEvalCostNs(0L);
+        }
+
+        auditAggregator.report(appId, entry);
     }
 
     @Override
@@ -187,18 +221,33 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
             HttpResponse<String> response = httpClient.send(request,
                     HttpResponse.BodyHandlers.ofString());
 
+            String batchResponseBody = null;
             if (response.statusCode() == 200 && response.body() != null) {
+                batchResponseBody = response.body();
                 // Parse batch response: UnifiedResponse<List<EvaluateResponse>>
                 // Extract "data" array from the JSON response
-                List<EvaluateResponse> results = parseBatchResult(response.body());
+                List<EvaluateResponse> results = parseBatchResult(batchResponseBody);
                 if (results != null && !results.isEmpty()) {
                     // Accumulate metrics for enabled flags
                     // Use the appId from the first request since all share the same appId
                     String batchAppId = requests.getFirst().getAppId();
-                    for (EvaluateResponse r : results) {
+                    for (int i = 0; i < results.size() && i < requests.size(); i++) {
+                        EvaluateResponse r = results.get(i);
+                        EvaluateRequest req = requests.get(i);
                         if (r.isEnabled()) {
                             aggregator.increment(batchAppId, r.getFlagKey());
                         }
+                        // Report audit log for each batch result
+                        AuditLogEntry entry = new AuditLogEntry();
+                        entry.setAppId(req.getAppId());
+                        entry.setFlagKey(req.getFlagKey());
+                        entry.setUserId(req.getUserId() != null ? req.getUserId() : "");
+                        entry.setEnabled(r.isEnabled());
+                        entry.setMatchedRule(r.getMatchReason() != null ? r.getMatchReason().name() : "default");
+                        entry.setEvalCostNs(r.getEvalCostNs());
+                        entry.setAttributesSnapshot(req.getAttributes() != null
+                                ? new HashMap<>(req.getAttributes()) : new HashMap<>());
+                        auditAggregator.report(batchAppId, entry);
                     }
                     return results;
                 }
@@ -444,6 +493,43 @@ public class LightFlagClient implements FlagSdkClient, AutoCloseable {
         if (start < json.length() && json.charAt(start) == 't') return true;
         if (start < json.length() && json.charAt(start) == 'f') return false;
         return false;
+    }
+
+    /**
+     * Extract the matchedRuleName from an EvaluateResponse JSON.
+     * Looks for "matchedRuleName":"..." in the response body.
+     */
+    static String parseMatchedRule(String json) {
+        if (json == null || json.isEmpty()) return "default";
+        String search = "\"matchedRuleName\":\"";
+        int start = json.indexOf(search);
+        if (start < 0) return "default";
+        start += search.length();
+        int end = json.indexOf('"', start);
+        if (end < 0) return "default";
+        return json.substring(start, end);
+    }
+
+    /**
+     * Extract the evalCostNs from an EvaluateResponse JSON.
+     * Looks for "evalCostNs":<number> in the response body.
+     */
+    static long parseEvalCostNs(String json) {
+        if (json == null || json.isEmpty()) return 0L;
+        String search = "\"evalCostNs\":";
+        int idx = json.indexOf(search);
+        if (idx < 0) return 0L;
+        int start = idx + search.length();
+        while (start < json.length() && json.charAt(start) == ' ') start++;
+        // Read digits
+        int end = start;
+        while (end < json.length() && json.charAt(end) >= '0' && json.charAt(end) <= '9') end++;
+        if (end == start) return 0L;
+        try {
+            return Long.parseLong(json.substring(start, end));
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
     }
 
     /**

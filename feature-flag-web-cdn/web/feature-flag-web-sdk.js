@@ -58,6 +58,12 @@
      */
     let flagHitCounts = {};
 
+    /**
+     * Audit log entries keyed by (appId):
+     *   { [appId]: Array<{flagKey, userId, enabled, matchedRule, attributesSnapshot}> }
+     */
+    let flagAuditLogs = {};
+
     /** @type {?Object} */
     let telemetryOptions = null;
 
@@ -194,64 +200,137 @@
     }
 
     /**
-     * Snapshot and reset all counters, POST one request per appId.
+     * Snapshot and reset all counters and audit logs, POST one request per appId.
      */
     function flushMetrics() {
-        const snapshot = flagHitCounts;
+        const metricsSnapshot = flagHitCounts;
         flagHitCounts = {};
 
-        const appIds = Object.keys(snapshot);
-        if (appIds.length === 0) return;
+        const auditSnapshot = flagAuditLogs;
+        flagAuditLogs = {};
 
-        for (const appId of appIds) {
-            const counts = snapshot[appId];
-            const keys = Object.keys(counts);
-            if (keys.length === 0) continue;
+        // Collect all appIds with either metrics or audit logs
+        const appIds = new Set();
+        Object.keys(metricsSnapshot).forEach(function (k) { appIds.add(k); });
+        Object.keys(auditSnapshot).forEach(function (k) { appIds.add(k); });
+        if (appIds.size === 0) return;
 
-            const payload = { appId: appId, flagHitCounts: {} };
-            for (const k of keys) {
-                if (counts[k] > 0) payload.flagHitCounts[k] = counts[k];
-            }
-
-            fetch(telemetryOptions.ingestUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            }).catch(function () {});
+        var ingestBase = telemetryOptions.ingestUrl;
+        // Remove trailing /api/v1/ingest/metrics if present to get base URL
+        var metricsSuffix = '/api/v1/ingest/metrics';
+        var auditBatchSuffix = '/api/v1/ingest/audit-log/batch';
+        if (ingestBase.indexOf('/api/v1/ingest') > 0) {
+            // ingestUrl is already the full metrics endpoint path
+            var baseUrl = ingestBase.substring(0, ingestBase.indexOf('/api/v1/ingest'));
+            var metricsUrl = baseUrl + metricsSuffix;
+            var auditBatchUrl = baseUrl + auditBatchSuffix;
+        } else {
+            var metricsUrl = ingestBase + metricsSuffix;
+            var auditBatchUrl = ingestBase + auditBatchSuffix;
         }
-    }
 
-    function flushViaBeacon() {
-        const snapshot = flagHitCounts;
-        flagHitCounts = {};
-
-        const appIds = Object.keys(snapshot);
-        if (appIds.length === 0) return;
-
-        for (const appId of appIds) {
-            const counts = snapshot[appId];
-            const keys = Object.keys(counts);
-            if (keys.length === 0) continue;
-
-            const payload = { appId: appId, flagHitCounts: {} };
-            for (const k of keys) {
-                if (counts[k] > 0) payload.flagHitCounts[k] = counts[k];
-            }
-
-            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-            if (navigator.sendBeacon) {
-                navigator.sendBeacon(telemetryOptions.ingestUrl, blob);
-            } else {
-                try {
-                    fetch(telemetryOptions.ingestUrl, {
+        appIds.forEach(function (appId) {
+            // Flush metrics
+            var counts = metricsSnapshot[appId];
+            if (counts) {
+                var keys = Object.keys(counts);
+                if (keys.length > 0) {
+                    var payload = { appId: appId, flagHitCounts: {} };
+                    for (var j = 0; j < keys.length; j++) {
+                        var k = keys[j];
+                        if (counts[k] > 0) payload.flagHitCounts[k] = counts[k];
+                    }
+                    fetch(metricsUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload),
-                        keepalive: true,
                     }).catch(function () {});
-                } catch (_) {}
+                }
             }
+
+            // Flush audit logs
+            var logs = auditSnapshot[appId];
+            if (logs && logs.length > 0) {
+                var auditPayload = logs.slice();
+                fetch(auditBatchUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(auditPayload),
+                }).catch(function () {});
+            }
+        });
+    }
+
+    function flushViaBeacon() {
+        const metricsSnapshot = flagHitCounts;
+        flagHitCounts = {};
+
+        const auditSnapshot = flagAuditLogs;
+        flagAuditLogs = {};
+
+        const appIds = new Set();
+        Object.keys(metricsSnapshot).forEach(function (k) { appIds.add(k); });
+        Object.keys(auditSnapshot).forEach(function (k) { appIds.add(k); });
+        if (appIds.size === 0) return;
+
+        var ingestBase = telemetryOptions.ingestUrl;
+        var metricsSuffix = '/api/v1/ingest/metrics';
+        var auditBatchSuffix = '/api/v1/ingest/audit-log/batch';
+        if (ingestBase.indexOf('/api/v1/ingest') > 0) {
+            var baseUrl = ingestBase.substring(0, ingestBase.indexOf('/api/v1/ingest'));
+            var metricsUrl = baseUrl + metricsSuffix;
+            var auditBatchUrl = baseUrl + auditBatchSuffix;
+        } else {
+            var metricsUrl = ingestBase + metricsSuffix;
+            var auditBatchUrl = ingestBase + auditBatchSuffix;
         }
+
+        appIds.forEach(function (appId) {
+            // Flush metrics
+            var counts = metricsSnapshot[appId];
+            if (counts) {
+                var keys = Object.keys(counts);
+                if (keys.length > 0) {
+                    var payload = { appId: appId, flagHitCounts: {} };
+                    for (var j = 0; j < keys.length; j++) {
+                        var k = keys[j];
+                        if (counts[k] > 0) payload.flagHitCounts[k] = counts[k];
+                    }
+                    var blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                    if (navigator.sendBeacon) {
+                        navigator.sendBeacon(metricsUrl, blob);
+                    } else {
+                        try {
+                            fetch(metricsUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload),
+                                keepalive: true,
+                            }).catch(function () {});
+                        } catch (_) {}
+                    }
+                }
+            }
+
+            // Flush audit logs
+            var logs = auditSnapshot[appId];
+            if (logs && logs.length > 0) {
+                var auditPayload = logs.slice();
+                var auditBlob = new Blob([JSON.stringify(auditPayload)], { type: 'application/json' });
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon(auditBatchUrl, auditBlob);
+                } else {
+                    try {
+                        fetch(auditBatchUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(auditPayload),
+                            keepalive: true,
+                        }).catch(function () {});
+                    } catch (_) {}
+                }
+            }
+        });
     }
 
     // ==================================================================
@@ -276,8 +355,10 @@
 
         // Evaluate
         let result = false;
+        let matchedRule = 'default';
         if (!flag.enabled) {
             result = false;
+            matchedRule = 'global-disabled';
         } else {
             const rules = flag.rules;
             if (rules && Array.isArray(rules) && rules.length > 0) {
@@ -285,20 +366,36 @@
                 for (const rule of rules) {
                     if (evaluateRule(rule, ctx)) {
                         result = rule.serveValue === true;
+                        matchedRule = rule.ruleName || rule.ruleId || 'rule-matched';
                         break;
                     }
                 }
             }
             if (result === false) {
                 result = flag.defaultServeValue === true;
+                matchedRule = 'default';
             }
         }
 
         // ---- Telemetry: count enabled evaluations per (appId, flagKey) ----
+        const appId = (context && context.appId) || telemetryOptions.appId;
         if (result && telemetryOptions && telemetryOptions.ingestUrl) {
-            const appId = (context && context.appId) || telemetryOptions.appId;
             if (!flagHitCounts[appId]) flagHitCounts[appId] = {};
             flagHitCounts[appId][flagKey] = (flagHitCounts[appId][flagKey] || 0) + 1;
+        }
+
+        // ---- Audit log: record every evaluation (enabled or not) ----
+        if (telemetryOptions && telemetryOptions.ingestUrl) {
+            if (!flagAuditLogs[appId]) flagAuditLogs[appId] = [];
+            flagAuditLogs[appId].push({
+                appId: appId,
+                flagKey: flagKey,
+                userId: (context && context.userId) || '',
+                enabled: result,
+                matchedRule: matchedRule,
+                attributesSnapshot: (context && context.attributes) || {},
+                evalCostNs: 0
+            });
         }
 
         return result;
