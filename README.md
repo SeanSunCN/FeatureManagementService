@@ -5,41 +5,59 @@ Cloud-native feature flag management system with control/data plane separation, 
 ## Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Client Layer (SDK)                                                    │
-│  Heavy SDK (Backend Microservices · SSE Long Connection ·            │
-│            Local Cache Evaluation)                                    │
-│  Light SDK (Mobile/Web · HTTP Blind Query · In-Memory                │
-│            Counting & Batching)                                       │
-└──────────────────────┬───────────────────────────────────────────────┘
-                       │
-┌──────────────────────▼───────────────────────────────────────────────┐
-│ CDN Cache Layer (Nginx)                                              │
-│  Serves rules.<ver>.json via HTTP (Cache Busting via manifest.json)  │
-│  Port 8084 · Static file server · Long-lived cache headers           │
-└──────────────────────────────────────────────────────────────────────┘
-                       │
-┌─────────────────┐                 ┌──────────────────────────────────┐
-│ Control Plane   │                 │ Data Plane                       │
-│ (Admin API)     │                 │ (EvalService)                    │
-│                 │                 │                                  │
-│ CRUD Flags/Apps │◄────Redis──────►│ Pure In-Memory Evaluation        │
-│ PostgreSQL      │   Pub/Sub       │ SSE Long Connection Push         │
-│ CdnSnapshotSvc  │                 │ Rule Engine                      │
-│ (write CDN)     │                 │                                  │
-└─────────────────┘                 └──────────────┬───────────────────┘
-                                                    │
-┌───────────────────────────────────────────────────▼──────────────────┐
-│ IngestService (Data Ingestion)                                       │
-│  Pool A: Fire & Forget → Redis High-Frequency Counter                │
-│  Pool B: Timeout Degradation → Kafka Audit Log                       │
-└──────────────┬────────────────────────────────────┬──────────────────┘
-               │                                    │
-┌──────────────▼──────────┐         ┌───────────────▼────────────────┐
-│  MetricsWorker           │         │  Kafka → ClickHouse            │
-│  Redis Periodic Flush    │         │  Audit Log Table               │
-│  Hit Metrics Table       │         │                                 │
-└─────────────────────────┘         └─────────────────────────────────┘
+┌──────────────────────────────────┐       ┌─────────────────────────────┐
+│ [heavy-client]                   │       │ [web-sdk]                   │
+│ Backend Microservices            │       │Frontend Browser             │
+│ SSE Local Cache Eval             │       │Static File Pull             │
+│ Send to Ingest Service           │       │Send to Ingest Service       │
+└──────┬───────────────────────────┘       └─────────────────────────────┘
+       │                                             │
+       │ (SSE Stream)                                │ (HTTP GET rules)
+       │                           ┌─────────────────▼───────────────────┐
+       │                           │ CDN Cache Layer (Nginx - Port 8084) │
+       │                           │  Serves rules.<ver>.json            │
+       │                           │  Cache Busting via manifest.json    │
+       │                           └──────────────────▲──────────────────┘
+       │                                              │
+       │                                              │ (Write Snapshots)
+┌──────▼───────────────────────────┐       ┌──────────┴──────────────────┐
+│ Data Plane                       │       │ Control Plane               │
+│  [flag-eval-service]             │       │  [admin-api]                │
+│                                  │◄─────►│                             │
+│  Pure In-Memory Evaluation       │[redis]│  CRUD Flags/Apps            │
+│  SSE Long Connection Push        │Pub/Sub│  [postgres] Database        │
+│  Rule Engine                     │       │                             │
+└──────┬───────────────────────────┘       └─────────────────────────────┘
+       │
+       │ (Report Hit/Telemetry)
+       ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [ingest-service] (Data Ingestion Layer)                                │
+│  - Pool A: Fire & Forget ──► [redis] High-Frequency Counter            │
+│  - Pool B: Timeout Degradation ──► [kafka] Audit Log                   │
+└──────┬─────────────────────────────────────────────┬───────────────────┘
+       │                                             │
+       │ (Periodic Flush)                            │ (Stream Consume)
+       ▼                                             ▼
+┌──────────────────────────────────┐       ┌─────────────────────────────┐
+│ [metrics-worker]                 │       │ Kafka Consumer Engine       │
+│  - Reads from Redis Counter      │       │  - Reads from Kafka Stream  │
+└──────┬───────────────────────────┘       └─────────┬───────────────────┘
+       │                                             │
+       │ (Write Metrics Data)                        │ (Write Audit Logs)
+       └─────────────────────┬───────────────────────┘
+                             ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ OLAP Storage Layer [clickhouse]                                        │
+│  - Hit Metrics Table (From metrics-worker Aggregated Telemetry)        │
+│  - Audit Log Table   (From Kafka Stream Granular Trails)               │
+└────────────────────────────▲───────────────────────────────────────────┘
+                             │ (Query Analytics / Scrape Metrics)
+┌────────────────────────────┴───────────────────────────────────────────┐
+│ Observability Stack                                                    │
+│  - [prometheus] : Pulls time-series metrics from core services         │
+│  - [grafana]    : Dashboards pulling from Prometheus & ClickHouse      │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -59,7 +77,7 @@ feature-management-service/
 │
 ├── flag-sdk-api/                        # [Pure Interface] FlagClient Interface + DTOs
 │                                        #   2.5 KB · Zero External Dependencies
-├── flag-sdk-light-client/               # [Lightweight] Java 11+ HttpClient
+├── flag-sdk-light-client/               # [Lightweight] Java 21+ HttpClient
 │   └── LightFlagClient.java            #   8.5 KB · Daemon Thread Batching · No Third-Party Libs
 ├── flag-sdk-heavy-client/               # [Heavy] SSE + Local Cache + WebFlux
 │   ├── HeavyFlagClient.java            #   18 KB · WebClient · Read/Write Lock
