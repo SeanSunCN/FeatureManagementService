@@ -54,7 +54,7 @@ jobs:
 
       - name: Run integration tests
         run: |
-          ssh aliyun "cd ${{ secrets.ALIYUN_PROJECT_DIR }} && bash deploy/scripts/integration-test.sh \
+          ssh aliyun "cd ${{ secrets.ALIYUN_PROJECT_DIR }} && python deploy/scripts/integration-test.py \
             http://localhost:8080 \
             http://localhost:8081 \
             http://localhost:8082 \
