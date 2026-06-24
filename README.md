@@ -70,17 +70,16 @@ feature-management-service/
 ├── flag-common/                         # [Shared Library] DTOs, enums, models, utils
 ├── flag-engine/                         # [Pure Engine] RuleEngine without Spring
 ├── flag-sdk-api/                        # [Interface] FlagSdkClient + DTOs
-├── flag-sdk-light-client/               # [Light SDK] Java 21 HttpClient, daemon batching
+├── feature-flag-web-cdn/                # [Web SDK + CDN] Browser JS SDK + static files
 ├── flag-sdk-heavy-client/               # [Heavy SDK] SSE + local cache + WebFlux
+├── flag-sdk-light-client/               # [Light SDK] Java 21 HttpClient, daemon batching
 ├── flag-admin-api/                      # [Control Plane] CRUD apps/flags, CDN publish
 ├── flag-eval-service/                   # [Data Plane] Pure in-memory evaluation
 ├── flag-ingest-service/                 # [Data Ingestion] Metrics + Audit log intake
 ├── flag-metrics-worker/                 # [Async Worker] Redis→ClickHouse batch flush
-├── feature-flag-web-cdn/               # [Web SDK + CDN] Browser JS SDK + static files
 └── deploy/
     ├── docker/                          # Docker compose + Dockerfiles + configs
     ├── scripts/                         # Integration tests, deploy, health check
-    └── k8s/                             # Kubernetes manifests
 ```
 
 ## Core Design Principles
