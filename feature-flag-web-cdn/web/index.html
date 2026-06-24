@@ -605,8 +605,13 @@
         ddState.textContent = diag.flagCount > 0 ? 'READY' : 'EMPTY';
         ddFlagCount.textContent = String(diag.flagCount);
         ddVersion.textContent = String(diag.version);
-        ddCache.textContent = diag.fromCache ? '✅ DISK CACHE' : '⚠ NETWORK';
-        ddCache.className = diag.fromCache ? 'cache-hit' : 'cache-miss';
+        if (!diag.fetched && diag.flagCount > 0) {
+            ddCache.textContent = '✅ LOCAL CACHE';
+            ddCache.className = 'cache-hit';
+        } else {
+            ddCache.textContent = diag.fromCache ? '✅ DISK CACHE' : '⚠ NETWORK';
+            ddCache.className = diag.fromCache ? 'cache-hit' : 'cache-miss';
+        }
         document.getElementById('ddUpdated').textContent = diag.updatedAt || 'N/A';
         document.getElementById('sdkLoaded').textContent = 'true';
     }
@@ -639,7 +644,13 @@
 
     // Event listeners
     refreshBtn.addEventListener('click', init);
-    evalBtn.addEventListener('click', renderAll);
+    evalBtn.addEventListener('click', function () {
+        // Mark as local-only eval so diagnostics show LOCAL CACHE
+        if (window.FeatureFlagSDK && window.FeatureFlagSDK.markLocalEval) {
+            window.FeatureFlagSDK.markLocalEval();
+        }
+        renderAll();
+    });
     forceEl.addEventListener('click', function () {
         console.log('[Demo] Force re-fetch');
         init();

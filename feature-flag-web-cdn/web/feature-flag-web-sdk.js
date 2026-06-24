@@ -47,8 +47,8 @@
     /** @type {string} */
     let baseCdnUrl = '';
 
-    /** @type {{fromCache: boolean, transferSize: number, duration: number}} */
-    let lastFetchDiagnostics = { fromCache: false, transferSize: -1, duration: -1 };
+    /** @type {{fromCache: boolean, transferSize: number, duration: number, fetched: boolean}} */
+    let lastFetchDiagnostics = { fromCache: false, transferSize: -1, duration: -1, fetched: false };
 
     // ---- Telemetry state ----
 
@@ -101,6 +101,7 @@
         }
 
         baseCdnUrl = cdnUrl.replace(/\/+$/, '');
+        lastFetchDiagnostics.fetched = true;
 
         const opts = options || {};
         telemetryOptions = {
@@ -456,7 +457,17 @@
             version: manifestVersion,
             flagCount: flagMap ? flagMap.size : 0,
             updatedAt: manifestUpdatedAt,
+            /** true if data in memory was fetched fresh; false if re-evaluating locally */
+            fetched: lastFetchDiagnostics.fetched,
         };
+    }
+
+    /**
+     * Mark that the most recent evaluation was purely local (no fetch).
+     * Called by the demo page before Re-evaluate to correct diagnostics display.
+     */
+    function markLocalEval() {
+        lastFetchDiagnostics.fetched = false;
     }
 
     function stopAutoRefresh() {
@@ -473,6 +484,7 @@
         isEnabled,
         getDiagnostics,
         stopAutoRefresh,
+        markLocalEval,
     };
 
 })(window);
