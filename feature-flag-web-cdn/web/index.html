@@ -277,25 +277,42 @@
         .diagnostics dd.error { color: #ef4444; }
 
         .controls {
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr auto;
             gap: 8px;
-            justify-content: flex-end;
-            align-items: center;
+            align-content: start;
         }
-        .btn {
-            padding: 10px 24px;
+        .controls-row {
+            display: contents;
+        }
+        .controls .btn {
+            padding: 10px 16px;
             border: none;
             border-radius: 8px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.15s;
+            width: 100%;
+            box-sizing: border-box;
+            text-align: center;
         }
-        .btn:hover { transform: translateY(-1px); }
-        .btn-primary { background: #3b82f6; color: #fff; }
-        .btn-secondary { background: #334155; color: #94a3b8; }
-        .btn-secondary:hover { background: #475569; color: #e2e8f0; }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-        .btn-sm { padding: 6px 14px; font-size: 13px; }
+        .controls .btn:hover { transform: translateY(-1px); }
+        .controls .btn-primary { background: #3b82f6; color: #fff; }
+        .controls .btn-secondary { background: #334155; color: #94a3b8; }
+        .controls .btn-secondary:hover { background: #475569; color: #e2e8f0; }
+        .controls .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .controls .profile-select {
+            background: #334155;
+            color: #e2e8f0;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            box-sizing: border-box;
+        }
 
         .footer {
             margin-top: 16px;
@@ -411,14 +428,13 @@
         </div>
         <div class="controls">
             <button class="btn btn-primary" id="refreshBtn">↻ Re-init SDK</button>
-            <button class="btn btn-secondary btn-sm" id="evalBtn">▶ Re-evaluate</button>
-            <button class="btn btn-secondary btn-sm" id="forceRefresh">⏩ Force Re-fetch</button>
-            <span style="margin-left:12px;color:#64748b;font-size:13px;">Profile:</span>
-            <select id="profileSelect" style="background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:4px 8px;font-size:13px;">
+            <select class="profile-select" id="profileSelect">
                 <option value="us-pro">🇺🇸 US Pro Admin</option>
                 <option value="eu-beta">🇪🇺 EU Beta Tester</option>
                 <option value="cn-free">🇨🇳 CN Free Guest</option>
             </select>
+            <button class="btn btn-secondary" id="evalBtn">▶ Re-evaluate</button>
+            <button class="btn btn-secondary" id="forceRefresh">⏩ Force Re-fetch</button>
         </div>
     </div>
 
