@@ -2,6 +2,9 @@
 
 Cloud-native feature flag management system with control/data plane separation, CDN distribution, and dual-channel metrics/audit ingestion.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SeanSunCN/FeatureManagementService/main/feature-flag-web-cdn/web/demo.gif" alt="Feature Flag Dashboard Demo" width="800">
+</p>
 
 ## Architecture Overview
 
